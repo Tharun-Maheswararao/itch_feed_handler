@@ -8,7 +8,7 @@ Workflow run: https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/r
 | OS | Linux 7.0.0-1013-aws x86_64 |
 | Compiler | gcc 13.3.0 |
 | Flags | `-O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native` |
-| Clock | rdtsc, resolution 15.0 ns |
+| Clock | rdtsc, 0.42 ns/tick, smallest step between two reads 15.0 ns |
 | Threads pinned | yes |
 
 **End-to-end latency** (parser stamp → book updated), median of the runs:

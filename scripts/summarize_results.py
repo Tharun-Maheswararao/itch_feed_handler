@@ -51,7 +51,8 @@ def main():
         f"| OS | {first['os']} |",
         f"| Compiler | {first['compiler']} |",
         f"| Flags | `{first['flags']}` |",
-        f"| Clock | {first['clock_source']}, resolution {float(first.get('clock_resolution_ns', first['clock_ns_per_tick'])):.1f} ns |",
+        f"| Clock | {first['clock_source']}, {float(first['clock_ns_per_tick']):.2f} ns/tick, smallest step between two reads "
+        f"{float(first.get('clock_resolution_ns', first['clock_ns_per_tick'])):.1f} ns |",
         f"| Threads pinned | {'yes' if pinned else '**no**'} |",
         "",
         "**End-to-end latency** (parser stamp → book updated), median of the runs:",

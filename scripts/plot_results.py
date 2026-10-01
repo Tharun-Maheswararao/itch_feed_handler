@@ -138,7 +138,7 @@ def chart_histogram(stats, hists, out, configs, host, resolution):
                     linewidth=2 if metric == "total" else 1.4, zorder=3 if metric == "total" else 2,
                     linestyle="-" if metric != "queue" else (0, (4, 2)))
         ax.axvline(resolution, color=INK_2, linewidth=0.8, linestyle=":")
-        ax.annotate("clock step", (resolution, 1), xytext=(3, -2), textcoords="offset points", fontsize=7.5,
+        ax.annotate("smallest clock step", (resolution, 1), xytext=(3, -2), textcoords="offset points", fontsize=7.5,
                     color=INK_2, va="top")
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -150,7 +150,7 @@ def chart_histogram(stats, hists, out, configs, host, resolution):
         ax.grid(False, which="minor")
     axes[0][0].set_ylabel("fraction of messages per ⅒ decade (log)")
     axes[0][-1].legend(loc="upper right")
-    fig.suptitle("Latency distribution of the median run (values under one clock step sit at the dotted line)",
+    fig.suptitle("Latency distribution of the median run (values below the smallest clock step sit at the dotted line)",
                  x=0.01, ha="left", fontsize=13, fontweight="bold", color=INK)
     caption(fig, host)
     fig.tight_layout(rect=(0, 0.04, 1, 0.95))
@@ -267,8 +267,14 @@ def chart_throughput(stats, out, configs, host):
             ax.set_title("Unpaced throughput per run")
             ax.legend(loc="lower left")
         else:
-            ax.set_yscale("log")
-            ax.set_ylabel("end-to-end p99 (log scale)")
+            vals = stats[stats["config"].isin(cfgs)]["total_p99_ns"]
+            if vals.max() / max(vals.min(), 1) >= 10:  # wide spread: log axis
+                ax.set_yscale("log")
+                ax.set_ylabel("end-to-end p99 (log scale)")
+                ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _p: ""))
+            else:  # tight spread: linear from zero shows how stable it is
+                ax.set_ylim(0, vals.max() * 1.25)
+                ax.set_ylabel("end-to-end p99")
             ax.yaxis.set_major_formatter(FuncFormatter(fmt_ns))
             ax.set_title("Paced p99 latency per run")
             ax.legend(loc="upper right")
@@ -294,8 +300,8 @@ def main():
     res = float(r["clock_resolution_ns"]) if "clock_resolution_ns" in stats.columns else float(r["clock_ns_per_tick"])
     if "paced" not in stats.columns:
         stats["paced"] = stats["config"].str.startswith("paced")
-    host = (f"{r['cpu_model']} · {r['os']} · {r['compiler'].split(' (')[0]} · clock {r['clock_source']}, "
-            f"resolution {res:.1f} ns")
+    host = (f"{r['cpu_model']} · {r['os']} · {r['compiler'].split(' (')[0]} · clock {r['clock_source']} "
+            f"({float(r['clock_ns_per_tick']):.2f} ns/tick), smallest step between reads {res:.1f} ns")
     chart_histogram(stats, hists, args.out, configs, host, res)
     chart_percentiles(stats, args.out, configs, host)
     chart_breakdown(stats, args.out, configs, host)

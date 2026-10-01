@@ -43,9 +43,10 @@ sum (end to end).
   dropping the ITCH timestamp. I kept the timestamp because paced replay and
   the live view use it, and chose clarity over the extra packing. See §10.
 
-Measured: about **5 ns per message, 170–230 M msgs/s, 5–7 GB/s** when the data is
-in the page cache. On a full-day file that does not fit in RAM, the parser runs
-at SSD speed instead.
+Measured: **10.4 ns per message (96 M msgs/s) on the pinned Linux Xeon** over
+the full day in page cache, and about 5 ns per message (170–230 M msgs/s) on an
+Apple M4 from page cache. On a full-day file that does not fit in RAM, the
+parser runs at SSD speed instead.
 
 ## 3. SPSC ring buffer
 
@@ -77,8 +78,8 @@ order map, not one per stock.
 ### Golden model (kept forever)
 
 `std::unordered_map<ref, Order>` plus, for each stock, two
-`std::map<price, Level>`. It is obviously correct, slow (274–352 ns per
-message here) and never optimized. Every optimization is checked against it.
+`std::map<price, Level>`. It is obviously correct, slow (about 270–350 ns per
+message) and never optimized. Every optimization is checked against it.
 
 ### Optimized book
 
@@ -107,8 +108,10 @@ best so the touch is at the back.
   for asks, so "ascending key" always means "towards the touch".
 * Level = {key, order count, total shares}: 16 bytes, four to a cache line.
 
-Measured on the full day: **63–67 ns against 274–352 ns per message, 4.1–5.6×**
-over the golden model, across two benchmark sessions.
+Measured on the full day, single threaded: **82.5 ns against 272 ns per
+message (3.3×) on the Linux Xeon**, and 63–67 ns against 274–352 ns (4.1–5.6×)
+on the Apple M4. Inside the two-thread pipeline the same update costs
+220–280 ns on the Xeon. That gap is open; see §10.
 
 ### Semantics (identical in both books)
 
@@ -224,10 +227,16 @@ with no screen recorder involved.
 
 ## 10. What I would change next
 
-1. **Batching across the ring.** Publish `head` once per *k* messages, and
-   pop runs of messages with a single acquire. This trades a few ns of
-   latency for fewer cache-line transfers, and would lift the SPSC ceiling
-   (18–34 ns per message on M4 without pinning) well clear of the book.
+1. **Find out why the pipeline costs more than its parts, then batch the
+   ring.** On the pinned Xeon, a book update costs 82.5 ns single threaded
+   but 220–280 ns inside the pipeline, and raw SPSC transfer costs 79 ns per
+   message (18–34 ns on an M4). Run `perf stat` / `perf c2c` on the instance
+   to see whether the time goes to cache-line transfers between the two
+   cores, to memory latency on the order table, or is partly an artefact of
+   the single-threaded figure being a subtraction. If cross-core traffic
+   dominates, publish `head`/`tail` once per *k* messages and pop runs of
+   messages with a single acquire, trading a few ns of latency for far fewer
+   cache-line transfers.
 2. **32-byte messages** by bit-packing side, type and locate. That puts two
    messages per 64-byte line and halves ring bandwidth.
 3. **Store a level handle in the order.** A price-indexed array around the

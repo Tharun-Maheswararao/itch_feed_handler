@@ -14,19 +14,18 @@ state.
 
 ## Results
 
-> **Host:** Apple M4 (4 performance + 6 efficiency cores), 16 GB RAM, macOS
-> 15.6.1, Apple clang 17.0.0, `-O3 -mcpu=native`. Clock: `cntvct_el0`, 1 GHz
-> units, **measured resolution 42 ns**.
-> **Caveat:** macOS cannot pin threads, and this machine was swapping (the
-> 8.25 GB file does not fit in its page cache next to other apps). These are
-> indicative numbers. The official pinned run is
-> [`bench/run_benchmark.sh`](bench/run_benchmark.sh) on a Linux EC2 instance;
-> see [Reproducing on Linux](#reproducing-on-linux).
+Pinned-core run on Linux, produced by the [Linux benchmark workflow](.github/workflows/benchmark.yml)
+([run](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/runs/36871008026),
+[summary](results/linux/SUMMARY.md)).
 
-**Correctness: the optimized two-thread pipeline equals the golden model**
-([log](results/logs/verify_full_day.txt), [noon cut](results/logs/verify_until_noon.txt)):
+> **Host:** AWS `c7i.2xlarge`, Intel Xeon Platinum 8488C (4 physical / 8
+> logical cores), Ubuntu 24.04 (kernel 7.0), gcc 13.3.0, `-O3 -march=native`.
+> Parser and book thread **pinned to two separate physical cores**. Clock:
+> `rdtsc`, 0.42 ns per tick.
 
-| Check | Full day | Cut at 12:00:00 |
+**Correctness: the optimized two-thread pipeline equals the golden model.**
+
+| Check | Linux, full day ([log](results/linux/logs/verify_full_day.txt)) | Mac, cut at 12:00:00 ([log](results/logs/verify_until_noon.txt)) |
 |---|---|---|
 | Book messages compared | 263,250,843 | 132,659,542 |
 | Per-message hash chain (digest after *every* message) | ✅ identical (251 checkpoints) | ✅ identical (126 checkpoints) |
@@ -34,71 +33,96 @@ state.
 | Invariants (level = Σ orders, sorted, no duplicates) | ✅ both books | ✅ both books |
 | Unknown refs / overfills / duplicate adds | 0 / 0 / 0 | 0 / 0 / 0 |
 
-**End-to-end latency** (parser stamp → book updated; median of 5 runs after 1 warmup):
+The full-day digest `1f3f7b7bcfdf76de` is **bit-for-bit identical on x86-64
+with gcc and on Apple Silicon with clang**
+([Mac log](results/logs/verify_full_day.txt)): the same 263 M-message book
+history is rebuilt on both.
+
+**End-to-end latency** (parser stamp → book updated), full day, median of 5
+runs after 1 warmup:
 
 | Configuration | Book msgs | Throughput | p50 | p90 | p99 | p99.9 | max |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **unpaced**, full day | 263.3 M | **7.10 M msgs/s** (7.07–7.21) | 2.23 ms | 2.42 ms | 3.08 ms | 5.51 ms | 21.5 ms |
-| **paced 2 M msgs/s**, 04:00–10:00 | 38.0 M | 2.00 M msgs/s | **183 ns** | **263 ns** | **607 ns** | 4.85 ms | 9.00 ms |
-| paced 2 M msgs/s, **live view on** | 38.0 M | 2.00 M msgs/s | 183 ns | 263 ns | 527 ns | 1.28 ms | 3.27 ms |
+| **unpaced** | 263.3 M | **3.18 M msgs/s** (3.07–3.23) | 5.24 ms | 5.46 ms | 6.01 ms | 7.21 ms | 7.55 ms |
+| **paced 2 M msgs/s** | 263.3 M | 2.00 M msgs/s | **506 ns** | **693 ns** | **4.48 µs** | 9.39 µs | 1.29 ms |
+| paced 2 M msgs/s, **live view on** | 263.3 M | 2.00 M msgs/s | 506 ns | 693 ns | 4.27 µs | 9.17 µs | 1.30 ms |
 
-**Book update alone** (t2 − t1), every run of every configuration: **p50
-125 ns, p99 335–375 ns, mean 110–116 ns**.
+Across all ten paced runs: p50 506–520 ns, p90 680–720 ns, and **p99
+4.16–4.59 µs**. Inside the pipeline, across all 15 runs, the book update alone
+(t2 − t1) has p50 220–273 ns and p99 533–653 ns; queue wait at 2 M msgs/s has
+p50 266–280 ns.
 
-**Components** ([micro_bench log](results/logs/micro_bench.txt)):
+**Components** ([micro_bench log](results/linux/logs/micro_bench.txt)), single
+threaded unless noted:
 
 | Component | Cost |
 |---|---|
-| Parser, data in page cache ([log](results/logs/parser_cached_2GB.txt)) | **~5 ns/msg: 170–206 M msgs/s, 5.2–6.4 GB/s** |
-| Golden book (`unordered_map` + `std::map`) | 274–352 ns per book message |
-| Fast book (open addressing + sorted vectors) | **63–67 ns per book message, 4.1–5.6× faster** |
-| SPSC ring, 48-byte messages, 2 threads | 18–34 ns/msg (29–55 M msgs/s), unpinned |
+| Parser | **10.4 ns/msg: 96 M msgs/s**, 2.95 GB/s (full file in page cache) |
+| Golden book (`unordered_map` + `std::map`) | 272 ns per book message |
+| Fast book (open addressing + sorted vectors) | **82.5 ns per book message, 3.3× faster** |
+| SPSC ring, 48-byte messages, 2 threads, unpinned | 79 ns/msg (12.7 M msgs/s) |
 
-Ranges span two separate benchmark sessions. The golden model swings more
-because its `std::map` nodes are scattered across memory, so it suffers most
-when the machine is paging.
+**How to read this:**
 
-**How to read this honestly:**
-
-* **Unpaced** is a throughput test. The parser decodes over 10× faster than the
-  book applies, so the ring is always full and each message waits for the
-  ~16k ahead of it. The 2.2 ms "latency" is that backlog
-  (16384 × ~140 ns), not a property of the code.
-* **Paced** releases messages on a fixed schedule at about 30% of book
-  capacity, as a feed would arrive. On macOS it replays 04:00–10:00, which
-  includes the opening cross and fits in RAM. Across all ten paced runs,
-  **p50 is 183–187 ns and p90 is 255–279 ns**.
-* **The tail beyond p99 is the machine, not the code.** Paced p99 was
-  471 ns–6.9 µs in nine of ten runs and 52 µs in one
-  ([chart](docs/throughput_runs.png)), but p99.9 and max reach milliseconds.
-  Stamps use the *scheduled* arrival time (coordinated-omission correction),
-  so when macOS deschedules a spinning thread for a few ms, every message
-  that arrives meanwhile is charged the wait. Book-update p99 stayed at
-  335–375 ns throughout. Pinned, isolated Linux cores are what remove this.
-  An earlier session on the same Mac under heavier load (swapping) gave paced
-  p99 from 7 µs to 193 ms. The code was identical; the machine was busier.
-* **The live view does not affect the pipeline:** p50 (183 ns), p90
-  (263 ns) and book-update time are identical with it on and off. The tail
-  differences between the two are run-to-run OS noise, which goes both ways.
-* A first attempt paced at 5 M msgs/s over the full day (about 74% load, with
-  the file paging from SSD) gave a p50 of 65–139 µs and a p99 from
-  17 ms to 1.8 s. It is kept in
-  [`results/logs/first_attempt_paced_5M/`](results/logs/first_attempt_paced_5M)
-  and is why the paced configuration changed.
-* On M4, `mean book update` in the pipeline (~112 ns) is higher than the
-  single-threaded 63–67 ns. The measured region includes two serializing
-  `isb; mrs` clock reads, and the message line arrives from the other core.
+* **Pinning makes the tail repeatable.** On the unpinned Mac, paced p99 ranged
+  from 0.5 µs to 193 ms between runs. Pinned on Linux, over the full day
+  rather than a slice, it stayed within 4.2–4.6 µs. Stamps use the
+  *scheduled* arrival time (coordinated-omission correction), so stalls are
+  charged to latency rather than hidden.
+* **Unpaced is a throughput test.** The parser is about 8× faster than the
+  book, so the ring stays full and each message waits behind the ~16k ahead
+  of it. The 5.2 ms "latency" is that backlog (16384 × ~314 ns), not a
+  property of the code.
+* **The live view does not affect the pipeline:** p50 and p90 are identical
+  with it on and off, and p99 differs by 0.2 µs, inside the run-to-run spread.
+* **An open question: the pipeline costs more per message than the parts.**
+  Single threaded, the fast book costs 82.5 ns per message, but inside the
+  pipeline a book update takes 220–280 ns, and unpaced throughput (314 ns per
+  message) is well below what the parts suggest. Three leading suspects, not
+  yet separated:
+  (1) **cross-core traffic** on the ring's indices and slots. Raw SPSC
+  transfer costs 79 ns/msg here against 18–34 ns on an M4, so moving cache
+  lines between cores is several times dearer on this Xeon;
+  (2) the single-threaded figure is a *subtraction* (parse+book − parse) that
+  benefits from the CPU overlapping parsing with the book's cache misses;
+  (3) cloud VM memory latency on the 192 MB order table.
+  The next step is batched index publication in the ring plus hardware
+  counters (`perf stat`) on the instance. See
+  [DESIGN.md §10](docs/DESIGN.md#10-what-i-would-change-next).
 
 ### Charts
 
-All five charts are rebuilt from the CSVs in [`results/`](results) by
-`python3 scripts/plot_results.py`.
+Built from [`results/linux/`](results/linux) by `python3 scripts/plot_results.py --results results/linux --out docs/linux`.
 
-![Latency histogram](docs/latency_histogram.png)
-![Latency percentiles](docs/latency_percentiles.png)
-![Queue wait vs book update](docs/latency_breakdown.png)
-![Message mix](docs/message_mix.png)
-![Run-to-run stability](docs/throughput_runs.png)
+![Latency histogram](docs/linux/latency_histogram.png)
+![Latency percentiles](docs/linux/latency_percentiles.png)
+![Queue wait vs book update](docs/linux/latency_breakdown.png)
+![Message mix](docs/linux/message_mix.png)
+![Run-to-run stability](docs/linux/throughput_runs.png)
+
+### Apple M4 results (unpinned, indicative)
+
+Same code on a MacBook Pro (Apple M4, 4 performance + 6 efficiency cores,
+16 GB RAM, macOS 15.6.1, Apple clang 17, `-O3 -mcpu=native`). macOS cannot pin
+threads, the 8.25 GB file did not fit in page cache next to other apps, and the
+`cntvct_el0` counter advances in 41.67 ns steps. Paced runs therefore replay
+04:00–10:00, which includes the open and fits in RAM.
+
+| Configuration | Book msgs | Throughput | p50 | p90 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| unpaced, full day | 263.3 M | 7.10 M msgs/s (7.07–7.21) | 2.23 ms | 2.42 ms | 3.08 ms | 5.51 ms | 21.5 ms |
+| paced 2 M msgs/s, 04:00–10:00 | 38.0 M | 2.00 M msgs/s | 183 ns | 263 ns | 607 ns | 4.85 ms | 9.00 ms |
+| paced 2 M msgs/s, live view on | 38.0 M | 2.00 M msgs/s | 183 ns | 263 ns | 527 ns | 1.28 ms | 3.27 ms |
+
+Book update alone: p50 125 ns, p99 335–375 ns. Fast book 63–67 ns against
+274–352 ns for the golden model (4.1–5.6×); parser about 5 ns/msg from page
+cache. Paced p99 swung from 471 ns to 52 µs across runs in this session, and up
+to 193 ms in an earlier, more heavily loaded one. The M4 is faster per message;
+only pinned Linux gives a repeatable tail. CSVs: [`results/`](results); charts:
+[histogram](docs/latency_histogram.png), [percentiles](docs/latency_percentiles.png),
+[breakdown](docs/latency_breakdown.png), [stability](docs/throughput_runs.png).
+An earlier attempt at 5 M msgs/s over the full day (74% load, paging from SSD)
+is kept in [`results/logs/first_attempt_paced_5M/`](results/logs/first_attempt_paced_5M).
 
 ### Reproducing on Linux
 
