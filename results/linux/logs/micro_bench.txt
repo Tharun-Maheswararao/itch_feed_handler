@@ -1,7 +1,9 @@
 268744780 messages, 263250843 book messages, best of 3
-parse only                      2.795 s     10.6 ns/book msg     96.2 M msgs/s
-parse + golden book            74.364 s    282.5 ns/book msg  (book only ~271.9 ns)
-parse + fast book              24.504 s     93.1 ns/book msg  (book only ~82.5 ns)
-fast book speedup over golden (book part): 3.30x
-spsc transfer (2 threads)      15.770 s    78.85 ns/msg     12.7 M msgs/s
-(checksum 1d3c200093233a6)
+parse only                      2.774 s     10.5 ns/book msg     96.9 M msgs/s
+parse + golden book            86.844 s    329.9 ns/book msg  (book only ~319.4 ns)
+parse + fast book              25.380 s     96.4 ns/book msg  (book only ~85.9 ns)
+fast book speedup over golden (book part): 3.72x
+spsc transfer, batch 1          9.114 s    45.57 ns/msg     21.9 M msgs/s
+spsc transfer, batch 8          5.144 s    25.72 ns/msg     38.9 M msgs/s
+spsc transfer, batch 32         3.273 s    16.36 ns/msg     61.1 M msgs/s
+(checksum 261ddc9bc4a71a6)
