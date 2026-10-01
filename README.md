@@ -187,6 +187,94 @@ costs about $0.50 per run. One-time AWS setup:
 [docs/AWS_BENCHMARK.md](docs/AWS_BENCHMARK.md).
 
 
+## Stage B: lock-free vs the alternatives
+
+The same pipeline, with the queue swapped by one template parameter
+(`run_pipeline<Queue>`), against three alternatives:
+
+| Queue | What it is | Version |
+|---|---|---|
+| `spsc` | this repo's ring ([`spsc_queue.hpp`](include/fh/queue/spsc_queue.hpp)) | this repo |
+| `rigtorp` | Erik Rigtorp's SPSCQueue, vendored unmodified | [`1053918`](third_party/rigtorp/VERSION) |
+| `boost` | `boost::lockfree::spsc_queue`, compile-time capacity | 1.83 (Ubuntu), 1.92 (Mac) |
+| `mutex` | `std::mutex` + `std::condition_variable` baseline ([`mutex_queue.hpp`](include/fh/queue/mutex_queue.hpp)) | this repo |
+| `spsc_unaligned` | this repo's ring with **unpadded** indices, to measure false sharing | this repo |
+
+Every queue gets the same 48-byte message, capacity, pinning, compiler flags,
+spin-wait policy and 1-in-16 latency sampling.
+[Full matrix: 60 cells](results/matrix/c7i.2xlarge/TABLE.md): 5 queues × 1K /
+64K / 1M slots × same-core / cross-core × full-speed / ITCH-paced, on the
+pinned `c7i.2xlarge`, median of 3 runs each.
+
+**Correctness first: a fast queue that fails does not count.**
+
+| Evidence | Result |
+|---|---|
+| Stress suite ([`test_queue_stress.cpp`](tests/test_queue_stress.cpp)): sequence must be exactly +1, random-delay interleavings, 4-slot wraparound, 48-byte payload integrity, full/empty, book hash vs golden at every checkpoint | ✅ all 5 queues, and clean under ThreadSanitizer, AddressSanitizer and UBSan, each its own CI build |
+| Book differential on real data, 04:00–12:00, pinned ([logs](results/matrix/c7i.2xlarge/logs)) | ✅ PASS for all 5 queues |
+| Long-run stress ([`queue_stress`](bench/queue_stress.cpp), every field of every message checked) | ✅ 0 errors: [Linux](results/stress/linux_c7i.2xlarge.txt), [M4, billions per queue](results/stress/long_run_m4.txt) |
+| Deliberate bug: one `release` store made `relaxed` ([details](docs/DESIGN.md#13-the-deliberate-bug)) | ThreadSanitizer reports it (and CI checks it does, every push). **Apple M4: millions of corrupted messages. x86: 0**, and the machine code is byte-identical |
+
+**Headline: cross-core, 64K slots** (pinned Xeon Platinum 8488C):
+
+| Queue | Unpaced throughput | Paced at the open: p50 | p90 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|
+| **spsc (this repo)** | **7.10 M msgs/s** | **706 ns** | 4.59 µs | 21.3 µs | 396 µs | 455 µs |
+| rigtorp | 6.08 M msgs/s | 773 ns | 4.48 µs | **19.2 µs** | **355 µs** | **419 µs** |
+| boost | 5.60 M msgs/s | 800 ns | 10.2 µs | 983 µs | 1.28 ms | 1.30 ms |
+| spsc, unpadded | 4.90 M msgs/s | 826 ns | 10.5 µs | 1.01 ms | 1.28 ms | 1.29 ms |
+| mutex | 2.23 M msgs/s | 8.11 µs | 192 ms | 273 ms | 276 ms | 276 ms |
+
+"Paced" replays the ITCH timestamps of 09:30:00–09:33:00 at 10× real time,
+which includes the opening burst; the messages before 09:30 build the book
+untimed.
+
+**What the matrix shows:**
+
+* **The tail gap dwarfs the median gap.** The mutex queue's p50 is 11× the
+  lock-free ones, but its p99 is about 13,000×. Every handoff takes the
+  lock, and a blocked side sleeps in the kernel and must be woken, so during
+  the opening burst it falls 200+ ms behind.
+* **This repo's ring has the highest throughput across cores**: +17% over
+  Rigtorp (7.09–7.12 against 6.06–6.08 M/s in every run), +27% over Boost,
+  3.2× the mutex. On paced latency at 64K it ties Rigtorp (p99 ranges
+  19.6–23.9 against 17.5–21.3 µs).
+* **Boost's gap comes from coherence traffic.** It keeps no cached copy of the
+  other side's index, so every push and pop reads the other core's cache
+  line. On one core, where that is cheap, it matches the others (6.56 M/s);
+  across cores it drops to 5.60 M/s and its p99 rises to about 1 ms.
+* **False sharing costs 31% of throughput** and multiplies p99 by 47 (21 µs
+  → 1.01 ms): `spsc_unaligned` is the same code with the four indices packed
+  onto shared lines. On one core, where the "other core" shares the L1, the
+  penalty almost vanishes (6.60 against 6.09 M/s).
+* **Same core is cheaper but worse.** Two hyperthreads of one core
+  communicate through a shared L1, giving the best p50 (466 ns for every
+  lock-free queue). But they also compete for that core's execution units,
+  so paced p99 is about 2 ms against about 20 µs on separate cores.
+* **Capacity does not buy throughput** (the book is the bottleneck: 7.08–7.16
+  M/s from 1K to 1M slots). It buys burst absorption: at 1K slots the opening
+  burst fills every ring, and Rigtorp's p99 rises to 737 µs and Boost's to
+  3.3 ms. This repo's ring held 16.6–31.6 µs in two of three runs (one run:
+  1.72 ms). Past 64K there is little further gain.
+* Cross-socket placement needs a 2-socket host; that run is pending.
+
+Why each queue behaves as it does, from reading their code:
+[DESIGN.md §14](docs/DESIGN.md#14-design-comparison-rigtorp-and-boost).
+
+![Percentiles: four queues](docs/matrix/c7i.2xlarge/queue_percentiles.png)
+![Latency CDF: four queues](docs/matrix/c7i.2xlarge/queue_cdf.png)
+![False sharing: padded vs unpadded indices](docs/matrix/c7i.2xlarge/alignment.png)
+![Thread placement](docs/matrix/c7i.2xlarge/placement.png)
+![Ring capacity](docs/matrix/c7i.2xlarge/capacity.png)
+
+Rebuild everything with `bench/run_matrix.sh data/12302019.NASDAQ_ITCH50`, or
+on EC2 with the [Linux benchmark workflow](.github/workflows/benchmark.yml)
+in `mode=matrix`. Each cell writes a `run_stats.csv` with `queue`,
+`queue_version`, `capacity` and `placement` columns, and
+[`matrix_table.py`](scripts/matrix_table.py) and
+[`plot_matrix.py`](scripts/plot_matrix.py) rebuild the table and the five
+charts from them.
+
 ## Architecture
 
 ```mermaid
@@ -268,17 +356,20 @@ existing CSVs, run `python3 scripts/plot_results.py`.
 | [`test_golden_compare`](tests/test_golden_compare.cpp) | fast book equals golden after every message; the two-thread pipeline (fast and golden books, paced and unpaced, view on) produces the identical per-message hash chain |
 | Invariants | each level's shares and order count equal the sum of its orders, levels are strictly sorted, no order is in two places |
 | [`test_histogram`](tests/test_histogram.cpp), [`test_seqlock`](tests/test_seqlock.cpp) | bucket math and error bound; no torn snapshot across 3M concurrent writes |
+| [`test_queue_stress`](tests/test_queue_stress.cpp) | the same 8 stress tests for all five queues (Stage B): exact +1 sequence, random-delay interleavings, 4-slot wraparound, payload integrity, full/empty, book hash vs golden at every checkpoint |
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every
 push. It builds with gcc and clang on Linux and clang on macOS, in Release and
-Debug, and runs ASan+UBSan and TSan builds. An end-to-end job generates a
+Debug, and runs AddressSanitizer, UndefinedBehaviorSanitizer and
+ThreadSanitizer as three separate builds. A fourth job builds the deliberate
+ordering bug and passes only if ThreadSanitizer reports it. An end-to-end job generates a
 synthetic feed and runs count → golden → verify → bench → charts.
 
 ## Repository layout
 
 ```
 include/fh/parser/   endian helpers, message struct, parser, mmap wrapper
-include/fh/queue/    SPSC ring buffer
+include/fh/queue/    SPSC ring (+ unpadded variant), mutex queue, Rigtorp/Boost adapters, queue selection
 include/fh/book/     golden book, fast book, order map, hashing, comparison
 include/fh/stats/    clock, histogram, report/CSV
 include/fh/view/     seqlock, snapshot, live view
@@ -289,6 +380,8 @@ tests/               GoogleTest suites
 bench/               micro-benchmarks, one-command benchmark script
 scripts/             plot_results.py (charts), make_gif.py (README GIF), summarize_results.py
 bench/aws/           one-time AWS setup for the EC2 benchmark workflow
+bench/run_matrix.sh  Stage B queue matrix; bench/queue_stress.cpp long-run stress tool
+third_party/rigtorp/ vendored SPSCQueue.h (MIT), with VERSION
 docs/                charts, GIF, design document
 results/             CSV output and logs from the runs shown above
 ```

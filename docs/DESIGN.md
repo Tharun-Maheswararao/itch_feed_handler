@@ -271,3 +271,189 @@ with no screen recorder involved.
    turn this replay tool into a live feed handler.
 7. **Per-stock sharding** across several book threads (locate mod N), one ring
    each, once a single book thread is the bottleneck.
+
+---
+
+# Stage B: proving the lock-free pipeline is faster *and* correct
+
+## 11. Memory ordering in the SPSC ring
+
+The ring needs exactly one ordering guarantee: **when the consumer sees the
+new head index, it must also see the slot the producer wrote before
+advancing it.** Everything else can be relaxed.
+
+```
+producer                                   consumer
+slots_[h & mask] = msg;        (plain)     t == head_cache_ ? head_cache_ = head_.load(acquire)
+head_.store(h + 1, release);   ──────────► out = slots_[t & mask];   (plain)
+                                            tail_.store(t + 1, release) ──► producer's tail_.load(acquire)
+```
+
+* `store(release)` on the index: no earlier write (the slot) may be
+  reordered after it.
+* `load(acquire)` on the other side: no later read (the slot) may be
+  reordered before it. A release store that is read by an acquire load
+  creates a *happens-before* edge, so the slot write is visible.
+* The same pair runs the other way on `tail_`: the producer must not
+  overwrite a slot until the consumer has finished reading it.
+* Each side reads its *own* index with `relaxed`, because only it writes it.
+
+What it costs: on x86-64 a release store and an acquire load are ordinary
+`mov`s, because x86 (TSO) never reorders a store with an earlier store or a
+load with a later load. On ARMv8 they are `stlr` and `ldapr`, real
+instructions with real ordering cost. That asymmetry is what §13 exploits.
+
+## 12. False sharing
+
+`spsc_unaligned` is the same queue with `kPadded = false`. The producer's
+index, its cached copy of the tail, the consumer's index and its cached copy
+of the head then share one or two cache lines. Every producer store to `head_`
+invalidates the line the consumer is polling for `tail_`, and vice versa,
+even though the two never touch each other's variables. This is *false*
+sharing, because the sharing is an accident of layout. Padding each field to
+its own line (128 B on Apple Silicon, 64 B elsewhere) removes it.
+
+Measured on the pinned Xeon, 64K slots
+([chart](../docs/matrix/c7i.2xlarge/alignment.png)):
+
+| Placement | Padded | Unpadded | |
+|---|---:|---:|---|
+| cross-core, unpaced throughput | 7.10 M/s | 4.90 M/s | **−31%** |
+| cross-core, paced p99 | 21.3 µs | 1.01 ms | **47×** |
+| same-core, unpaced throughput | 6.60 M/s | 6.09 M/s | −8% |
+
+On the two hyperthreads of one core, the "other core" shares the same L1, so
+an invalidation costs almost nothing and the penalty nearly disappears. False
+sharing is a cross-core cost, which is why it never shows up in a
+single-machine, unpinned benchmark that happens to schedule both threads
+close together.
+
+## 13. The deliberate bug
+
+**The change:** one line, behind `-DFH_INJECT_ORDERING_BUG=ON`. The producer
+publishes the head with `memory_order_relaxed` instead of `release`
+(`SpscQueue::publish_head`). Everything else is identical.
+
+**1. ThreadSanitizer reports it immediately**
+([report](../results/bug_experiment/tsan_report.txt)): *"data race … Read of
+size 8 … by thread T1"* (the consumer reading a slot) against *"Previous write
+of size 8 … by main thread"* (the producer writing that slot). Without the
+release/acquire pair there is no happens-before edge between them, so under
+the C++ memory model the program has a data race and undefined behaviour.
+CI rebuilds the bug on every push, and the `deliberate-bug` job passes only
+if TSan still catches it.
+
+**2. On ARM it corrupts real data.** A release build with the bug on an
+Apple M4, through `queue_stress`, which checks every field of every 48-byte
+message ([log](../results/bug_experiment/runtime_arm64_m4.txt)):
+
+| Ring | Messages | Out of sequence | Corrupted payload |
+|---:|---:|---:|---:|
+| 4 slots | 2.78 billion | 2,572,990 | 1,338,995 |
+| 64 slots | 14.8 billion | 2,933,300 | 3,324,560 |
+| 1024 slots | 17.4 billion | 2,271,726 | 2,287,864 |
+| correct build, 4 and 64 slots (control) | 9.6 billion | **0** | **0** |
+
+The buggy build was also *faster* (246 against 130 M ops/s at 64 slots),
+because `str` skips the ordering work that `stlr` does. A benchmark alone
+would have rewarded the bug.
+
+**3. On x86 it cannot show up with this compiler.** The generated code
+([asm](../results/bug_experiment/asm/)) for one `try_push`:
+
+| | correct (`release`) | bug (`relaxed`) |
+|---|---|---|
+| ARM64 | slot: `stp q1,q2,[x8,#16]`; `str q0,[x8]`; then index: **`stlr x9,[x0]`** | the same slot stores, then **`str x9,[x0]`** |
+| x86-64 | slot: three `movaps`; then index: `movq %rax,(%rdi)` | **identical, byte for byte** |
+
+In both ARM builds the compiler keeps the slot stores *before* the index
+store. The reordering that corrupted millions of messages is done by the
+CPU: ARM lets a later store become visible to another core before an
+earlier one, and `stlr` is what forbids that. x86 never reorders
+store-store, so a release store *is* a plain store, and the machine code does
+not change. The bug is still real on x86. The C++ standard allows the
+compiler to sink the slot write below a relaxed store, and a different
+compiler version, optimisation level or surrounding code could do so. Only a
+tool that checks the *language* rules (TSan) finds it reliably.
+
+**4. The x86 runtime run confirms it.** The same buggy release build, pinned
+on the Xeon ([log](../results/bug_experiment/runtime_x86_c7i.2xlarge.txt)):
+4, 64 and 1024 slots, 60 s each, **1.09 billion messages, 0 sequence errors,
+0 payload errors.** The identical source corrupts millions of messages on ARM
+and none on x86.
+
+**The lesson:** a test suite that passes on x86 says nothing about memory
+ordering. Run the stress tests on ARM, run TSan, and treat every
+`memory_order` argument as a claim that needs a reason.
+
+## 14. Design comparison: Rigtorp and Boost
+
+I read both implementations only after this repo's ring had been designed
+and benchmarked in Stage A, so mine could not drift toward theirs. Each sits
+behind a thin adapter ([`industry_queues.hpp`](../include/fh/queue/industry_queues.hpp))
+that uses only its public API and waits with the same `cpu_relax()` spin.
+
+| | This repo | Rigtorp SPSCQueue (`1053918`) | boost::lockfree::spsc_queue (1.83 / 1.92) |
+|---|---|---|---|
+| Capacity | compile-time power of two | runtime, any size | compile-time (as used here) |
+| Index wrap | `i & mask` on 64-bit indices that never wrap | compare with capacity, reset to 0 | `& mask` only if *N+1* is a power of two, else a subtract loop |
+| Full vs empty | `head − tail == N`, all N slots usable | one slack slot (N+1 allocated) | one slack slot (N+1 allocated) |
+| Cached copy of the other index | yes, refreshed only when it looks full or empty | yes, same idea | **no**: every push loads `read_index_`, every pop loads `write_index_` |
+| Index padding | each index and each cache on its own line; 128 B on Apple Silicon | each on its own line; `hardware_destructive_interference_size`, else 64 B | the two indices padded to a per-architecture size (64 / 128 / 256 B) |
+| Slot array | cache-line aligned, not padded at the ends | padded with `kPadding` slots at both ends against neighbouring heap data | stored inside the queue object (compile-time capacity) |
+| Read API | copy out (`try_pop(T&)`) | zero-copy (`front()` then `pop()`) | copy out via a functor (`consume_one`) |
+| Ordering | relaxed own / acquire other / release publish | identical | identical |
+| Extras | optional index batching (`set_batch`) | allocator support, `emplace` | bulk push/pop, iterator ranges |
+
+**Why Boost is slower across cores.** Without a cached index, every
+operation reads the other core's cache line. While the producer is writing
+`write_index_` once per message, the consumer reads it once per message, so
+the line goes back and forth between the cores on almost every operation.
+On one core, where the "other core" is the sibling hyperthread on the same
+L1, that costs little, and Boost matches the others (6.56 M/s same-core). Across
+cores it drops to 5.60 M/s, and in the paced bursts its p99 is 46× this
+repo's (983 µs against 21.3 µs). There is also a smaller, avoidable cost here:
+`capacity<65536>` allocates 65537 slots, which is not a power of two, so
+`next_index` takes the subtract-loop path instead of a mask.
+`capacity<65535>` would give Boost its fast path. The matrix keeps the same
+nominal capacity for all four queues, as the comparison rules require.
+
+**Rigtorp against this repo: almost the same design, and a result I have not
+fully explained.** The memory ordering is identical, both cache the other
+index, and both pad each index to its own line. Across cores this repo's ring
+is 17% faster in every run (7.09–7.12 against 6.06–6.08 M/s) and holds its
+tail far better in a 1K ring under burst (two runs of three at 17–32 µs
+against Rigtorp's 680–790 µs). On one core Rigtorp is slightly *ahead*
+(6.73 against 6.60 M/s at 64K). Since the gap appears only when the
+indices cross cores, it is a cache-coherence effect rather than an
+instruction-count one. The differences that can affect coherence are:
+
+1. **Index representation.** Rigtorp's indices wrap at capacity, mine are
+   64-bit counters that never wrap. Both publish one store per operation, so
+   this should not change traffic, but it changes the full test (one slack
+   slot against none) and so how often a full ring forces a refresh.
+2. **Slot array placement.** Mine starts on a cache-line boundary; Rigtorp's
+   starts `kPadding` slots into a `std::allocator` block. With 48-byte
+   slots, that shifts which slots share a line, which matters when the ring
+   is full and the producer writes the slot just behind the one the consumer
+   is reading.
+3. **Producer reads of its own index.** Rigtorp reloads `writeIdx_` (the
+   shared line the consumer polls) at the start of every push; mine reads a
+   private copy and only *stores* to the shared line.
+
+I have not isolated which of these accounts for the 17%. The measurement
+that would is `perf c2c` (cache-to-cache transfer counts per cache line),
+which needs precise load-latency sampling (Intel PEBS). On the
+`c7i.2xlarge` VM even basic cache events were unavailable: `perf stat` reported
+`LLC-load-misses` as `<not supported>` and `cache-misses` as 0 in the Stage A
+diagnosis run. Bare metal exposes the full PMU, so the 2-socket metal run is
+the place to take it. The honest
+conclusion today: on a Xeon, across cores, this ring is faster than Rigtorp's
+for this workload, by a margin that is consistent across runs, and the
+mechanism is not yet proven.
+
+**What I would take from them.** Rigtorp's end padding of the slot array is
+a real improvement this ring lacks: neighbouring heap data can share the
+first or last slot's cache line. Its zero-copy `front()`/`pop()` would save a
+48-byte copy per message. Boost's bulk `push(begin, end)` is the natural API
+for the index batching measured in §10 and Stage A's diagnosis.
