@@ -1,0 +1,7 @@
+# Release build with FH_INJECT_ORDERING_BUG on c7i.2xlarge (x86-64), pinned
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                   4      no        323432448        5.4          0          0
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                  64      no        308260864        5.1          0          0
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                1024      no        457981952        7.6          0          0

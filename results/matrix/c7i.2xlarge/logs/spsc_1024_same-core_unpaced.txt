@@ -1,0 +1,52 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.988 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    spsc (this repo), capacity 1024 slots, placement same-core
+warmup 1 done: 5.66 s
+Run 1 [spsc_1024_same-core_unpaced]  latency sampled 1/16  wall 5.724 s   6.90 M file msgs/s   6.64 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 183.6 ns   ring depth at samples p50 1024 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     157.01 us  180.91 us  225.28 us  314.03 us    1.42 ms  154.27 us
+  queue     157.01 us  180.91 us  218.45 us  314.03 us    1.42 ms  154.09 us
+  book         170 ns     333 ns     586 ns     906 ns   44.00 us     184 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 2 [spsc_1024_same-core_unpaced]  latency sampled 1/16  wall 5.652 s   6.99 M file msgs/s   6.73 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 181.2 ns   ring depth at samples p50 1024 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     157.01 us  177.49 us  211.63 us  307.20 us    1.43 ms  152.34 us
+  queue     157.01 us  177.49 us  211.63 us  307.20 us    1.43 ms  152.15 us
+  book         166 ns     333 ns     573 ns     853 ns   38.68 us     181 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [spsc_1024_same-core_unpaced]  latency sampled 1/16  wall 5.669 s   6.97 M file msgs/s   6.71 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 181.5 ns   ring depth at samples p50 1024 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     157.01 us  177.49 us  215.04 us  314.03 us    1.50 ms  152.80 us
+  queue     157.01 us  177.49 us  215.04 us  314.03 us    1.50 ms  152.62 us
+  book         166 ns     333 ns     573 ns     880 ns   79.66 us     181 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 3
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.2xlarge/spsc_1024_same-core_unpaced/histogram.csv and results/matrix/c7i.2xlarge/spsc_1024_same-core_unpaced/run_stats.csv

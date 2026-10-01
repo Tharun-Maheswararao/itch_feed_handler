@@ -1,0 +1,51 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.989 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 09:33:00: 0.37 of 8.25 GB
+queue    spsc_unaligned (this repo), capacity 1048576 slots, placement same-core
+warmup 1 done: 18.54 s
+Run 1 [spsc_unaligned_1048576_same-core_paced_itch]  queue spsc_unaligned  latency sampled 1/16  wall 18.526 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 227.5 ns   ring depth at samples p50 0 p99 14079 max 15719
+  latency         p50        p90        p99       p999        max       mean
+  total        480 ns   23.47 us    2.46 ms    2.73 ms    2.77 ms   83.28 us
+  queue        120 ns   23.47 us    2.46 ms    2.73 ms    2.77 ms   83.06 us
+  book         176 ns     426 ns     786 ns    2.83 us   25.25 us     227 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 2 [spsc_unaligned_1048576_same-core_paced_itch]  queue spsc_unaligned  latency sampled 1/16  wall 18.524 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 225.5 ns   ring depth at samples p50 0 p99 6783 max 9258
+  latency         p50        p90        p99       p999        max       mean
+  total        466 ns   13.44 us    1.12 ms    1.53 ms    1.55 ms   45.68 us
+  queue        116 ns   13.23 us    1.12 ms    1.53 ms    1.55 ms   45.45 us
+  book         176 ns     426 ns     773 ns    2.08 us   98.42 us     225 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 3 [spsc_unaligned_1048576_same-core_paced_itch]  queue spsc_unaligned  latency sampled 1/16  wall 18.529 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 225.4 ns   ring depth at samples p50 0 p99 11519 max 13516
+  latency         p50        p90        p99       p999        max       mean
+  total        466 ns   17.07 us    1.97 ms    2.34 ms    2.34 ms   73.81 us
+  queue        116 ns   16.64 us    1.97 ms    2.34 ms    2.34 ms   73.58 us
+  book         176 ns     426 ns     773 ns    2.13 us   17.82 us     225 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 3
+Message mix (10887405 messages, 0.37 GB)
+  A       4110287   37.75%
+  D       3197229   29.37%
+  I       1073085    9.86%
+  U        790909    7.26%
+  F        789798    7.25%
+  X        547528    5.03%
+  L        215089    1.98%
+  E         99793    0.92%
+  P         25802    0.24%
+  Y          8911    0.08%
+  R          8906    0.08%
+  Q          8906    0.08%
+  H          8901    0.08%
+  C          2254    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.2xlarge/spsc_unaligned_1048576_same-core_paced_itch/histogram.csv and results/matrix/c7i.2xlarge/spsc_unaligned_1048576_same-core_paced_itch/run_stats.csv

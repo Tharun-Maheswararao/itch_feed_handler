@@ -1,0 +1,52 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.988 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    mutex (std::mutex + std::condition_variable), capacity 1024 slots, placement cross-core
+warmup 1 done: 17.18 s
+Run 1 [mutex_1024_cross-core_unpaced]  queue mutex  latency sampled 1/16  wall 17.270 s   2.29 M file msgs/s   2.20 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 198.6 ns   ring depth at samples p50 1023 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     477.87 us  505.18 us  546.14 us  628.06 us    1.35 ms  463.00 us
+  queue     477.87 us  505.18 us  546.14 us  628.06 us    1.35 ms  462.80 us
+  book         176 ns     366 ns     626 ns     960 ns   19.28 us     199 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 2 [mutex_1024_cross-core_unpaced]  queue mutex  latency sampled 1/16  wall 17.274 s   2.29 M file msgs/s   2.20 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 199.2 ns   ring depth at samples p50 1023 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     477.87 us  505.18 us  546.14 us  628.06 us    1.30 ms  463.12 us
+  queue     477.87 us  505.18 us  546.14 us  628.06 us    1.30 ms  462.92 us
+  book         176 ns     366 ns     640 ns     960 ns  155.07 us     199 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [mutex_1024_cross-core_unpaced]  queue mutex  latency sampled 1/16  wall 17.417 s   2.27 M file msgs/s   2.18 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 200.1 ns   ring depth at samples p50 1023 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     477.87 us  505.18 us  546.14 us  628.06 us    1.31 ms  467.00 us
+  queue     477.87 us  505.18 us  546.14 us  628.06 us    1.31 ms  466.80 us
+  book         176 ns     373 ns     640 ns     986 ns   36.30 us     200 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 2
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.2xlarge/mutex_1024_cross-core_unpaced/histogram.csv and results/matrix/c7i.2xlarge/mutex_1024_cross-core_unpaced/run_stats.csv

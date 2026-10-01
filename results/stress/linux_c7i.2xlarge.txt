@@ -1,0 +1,15 @@
+# queue_stress on c7i.2xlarge (Intel(R) Xeon(R) Platinum 8488C), pinned 1/2
+queue           capacity  delays            items    M ops/s    seq_err payload_err
+spsc                   4      no        563912704        9.4          0          0
+spsc_unaligned         4      no        324263936        5.4          0          0
+mutex                  4      no         46039040        0.8          0          0
+rigtorp                4      no        586199040        9.8          0          0
+boost                  4      no        408403968        6.8          0          0
+CLEAN: every message arrived once, in order, intact
+queue           capacity  delays            items    M ops/s    seq_err payload_err
+spsc                1024     yes        233480192        3.9          0          0
+spsc_unaligned      1024     yes        169119744        2.8          0          0
+mutex               1024     yes        112930816        1.9          0          0
+rigtorp             1024     yes        231231488        3.9          0          0
+boost               1024     yes        183574528        3.1          0          0
+CLEAN: every message arrived once, in order, intact
