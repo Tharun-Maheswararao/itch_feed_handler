@@ -1,0 +1,52 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.986 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    boost (boost 1_83), capacity 1024 slots, placement cross-core
+warmup 1 done: 6.60 s
+Run 1 [boost_1024_cross-core_unpaced]  queue boost  latency sampled 1/16  wall 5.998 s   6.59 M file msgs/s   6.34 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 182.7 ns   ring depth at samples p50 1024 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     167.25 us  184.32 us  211.63 us  293.55 us    1.07 ms  161.46 us
+  queue     167.25 us  184.32 us  211.63 us  293.55 us    1.07 ms  161.28 us
+  book         163 ns     326 ns     560 ns     840 ns   31.87 us     183 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 2 [boost_1024_cross-core_unpaced]  queue boost  latency sampled 1/16  wall 6.654 s   5.94 M file msgs/s   5.72 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 189.3 ns   ring depth at samples p50 1023 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     184.32 us  204.80 us  238.93 us  334.51 us    1.13 ms  179.05 us
+  queue     184.32 us  204.80 us  238.93 us  334.51 us    1.12 ms  178.86 us
+  book         166 ns     340 ns     573 ns     853 ns   17.22 us     189 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [boost_1024_cross-core_unpaced]  queue boost  latency sampled 1/16  wall 7.344 s   5.38 M file msgs/s   5.18 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 205.9 ns   ring depth at samples p50 1023 p99 1024 max 1024
+  latency         p50        p90        p99       p999        max       mean
+  total     204.80 us  225.28 us  259.41 us  341.33 us    1.09 ms  197.62 us
+  queue     204.80 us  225.28 us  259.41 us  341.33 us    1.09 ms  197.42 us
+  book         176 ns     366 ns     613 ns     906 ns   38.23 us     206 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 2
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.2xlarge/boost_1024_cross-core_unpaced/histogram.csv and results/matrix/c7i.2xlarge/boost_1024_cross-core_unpaced/run_stats.csv

@@ -1,0 +1,51 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.989 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 09:33:00: 0.37 of 8.25 GB
+queue    spsc (this repo), capacity 65536 slots, placement cross-core
+warmup 1 done: 18.47 s
+Run 1 [spsc_65536_cross-core_paced_itch]  latency sampled 1/16  wall 18.467 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 205.0 ns   ring depth at samples p50 1 p99 159 max 3083
+  latency         p50        p90        p99       p999        max       mean
+  total        706 ns    4.59 us   21.33 us  395.95 us  454.81 us    3.29 us
+  queue        393 ns    4.37 us   21.33 us  395.95 us  454.66 us    3.08 us
+  book         163 ns     400 ns     733 ns    2.35 us   13.80 us     205 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 2 [spsc_65536_cross-core_paced_itch]  latency sampled 1/16  wall 18.469 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 205.8 ns   ring depth at samples p50 1 p99 167 max 2806
+  latency         p50        p90        p99       p999        max       mean
+  total        720 ns    4.59 us   23.89 us  334.51 us  393.62 us    3.06 us
+  queue        393 ns    4.37 us   23.47 us  334.51 us  393.43 us    2.85 us
+  book         163 ns     400 ns     733 ns    1.81 us  106.14 us     206 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 3 [spsc_65536_cross-core_paced_itch]  latency sampled 1/16  wall 18.465 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 205.3 ns   ring depth at samples p50 1 p99 131 max 2550
+  latency         p50        p90        p99       p999        max       mean
+  total        706 ns    4.48 us   19.63 us  286.72 us  350.99 us    2.88 us
+  queue        393 ns    4.37 us   19.20 us  286.72 us  350.74 us    2.67 us
+  book         163 ns     400 ns     720 ns    1.81 us  106.49 us     205 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 1
+Message mix (10887405 messages, 0.37 GB)
+  A       4110287   37.75%
+  D       3197229   29.37%
+  I       1073085    9.86%
+  U        790909    7.26%
+  F        789798    7.25%
+  X        547528    5.03%
+  L        215089    1.98%
+  E         99793    0.92%
+  P         25802    0.24%
+  Y          8911    0.08%
+  R          8906    0.08%
+  Q          8906    0.08%
+  H          8901    0.08%
+  C          2254    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.2xlarge/spsc_65536_cross-core_paced_itch/histogram.csv and results/matrix/c7i.2xlarge/spsc_65536_cross-core_paced_itch/run_stats.csv
