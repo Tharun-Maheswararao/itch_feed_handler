@@ -40,6 +40,11 @@ on:
       matrix_caps:
         description: "matrix: capacities"
         default: "1024 65536 1048576"
+      matrix_scope:
+        description: "matrix: full = also per-queue golden check, stress, x86 bug test; lean = matrix (+ perf c2c on metal) only"
+        type: choice
+        default: full
+        options: [full, lean]
 
 permissions:
   id-token: write   # OIDC: assume the AWS role without stored keys
@@ -117,7 +122,7 @@ jobs:
           $SUDO apt-get update -q
           $SUDO apt-get install -y -q build-essential cmake curl libboost-dev \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
-          if [ "${{ inputs.mode }}" = diagnose ]; then
+          if [ "${{ inputs.mode }}" = diagnose ] || [ "${{ contains(inputs.instance_type, 'metal') }}" = true ]; then
             # perf for hardware counters; best effort (package names vary by kernel)
             $SUDO apt-get install -y -q linux-tools-common "linux-tools-$(uname -r)" \
               || $SUDO apt-get install -y -q linux-tools-common linux-tools-aws || true
@@ -168,8 +173,12 @@ jobs:
           bench/run_matrix.sh data/12302019.NASDAQ_ITCH50
           cat "$OUT/TABLE.md" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: perf c2c cache-line contention (bare metal only)
+        if: ${{ inputs.mode == 'matrix' && contains(inputs.instance_type, 'metal') }}
+        run: bench/c2c_profile.sh data/12302019.NASDAQ_ITCH50 results/matrix/${{ inputs.instance_type }}/c2c spsc rigtorp
+
       - name: Book differential per queue (real data, until 12:00, pinned)
-        if: ${{ inputs.mode == 'matrix' }}
+        if: ${{ inputs.mode == 'matrix' && inputs.matrix_scope == 'full' }}
         run: |
           OUT=results/matrix/${{ inputs.instance_type }}
           cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))
@@ -180,7 +189,7 @@ jobs:
           done
 
       - name: Stress and deliberate-bug runtime test on x86
-        if: ${{ inputs.mode == 'matrix' }}
+        if: ${{ inputs.mode == 'matrix' && inputs.matrix_scope == 'full' }}
         run: |
           inst=${{ inputs.instance_type }}
           cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))

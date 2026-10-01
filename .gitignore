@@ -8,3 +8,5 @@ __pycache__/
 compile_commands.json
 results/**/demo_view/
 .cache/
+results/**/c2c/run_*/
+results/**/*.data
