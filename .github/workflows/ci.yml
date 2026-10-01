@@ -18,34 +18,71 @@ jobs:
           - { os: macos-14, cxx: clang++, build: Release }
     steps:
       - uses: actions/checkout@v4
+      - name: Install Boost (lockfree baseline)
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update -q && sudo apt-get install -y -q libboost-dev
+          else HOMEBREW_NO_AUTO_UPDATE=1 brew install boost; fi
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DFH_NATIVE=OFF
       - name: Build
         run: cmake --build build -j4
-      - name: Unit tests
+      - name: Unit and stress tests (all five queues)
         run: ctest --test-dir build --output-on-failure -j4
 
+  # One build per sanitizer: they cannot be combined. ThreadSanitizer runs
+  # 5-15x slower, so it gets a smaller stress workload.
   sanitizers:
     name: sanitizer (${{ matrix.sanitize }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        sanitize: [ "address,undefined", "thread" ]
+        include:
+          - { sanitize: address, items: "300000" }
+          - { sanitize: undefined, items: "300000" }
+          - { sanitize: thread, items: "50000" }
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libboost-dev
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++-18
           -DFH_NATIVE=OFF -DFH_SANITIZE=${{ matrix.sanitize }}
       - name: Build
         run: cmake --build build -j4
-      - name: Unit tests
+      - name: Unit and stress tests
         env:
+          FH_STRESS_ITEMS: ${{ matrix.items }}
           FH_SPSC_ITEMS: "2000000"
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build --output-on-failure -j2
+
+  # The deliberate bug (docs/DESIGN.md): one release store made relaxed.
+  # This job passes only if ThreadSanitizer reports the data race.
+  deliberate-bug:
+    name: deliberate ordering bug is caught by ThreadSanitizer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with FH_INJECT_ORDERING_BUG under ThreadSanitizer
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DFH_NATIVE=OFF -DFH_SANITIZE=thread -DFH_INJECT_ORDERING_BUG=ON -DFH_WITH_BOOST=OFF
+          cmake --build build -j4 --target test_spsc_queue
+      - name: Expect a ThreadSanitizer data race report
+        run: |
+          set +e
+          TSAN_OPTIONS=halt_on_error=1 ./build/test_spsc_queue --gtest_filter='SpscQueue.MessagePayloadIntegrity' > tsan.txt 2>&1
+          status=$?
+          set -e
+          grep -A12 "WARNING: ThreadSanitizer" tsan.txt | head -30
+          if grep -q "WARNING: ThreadSanitizer: data race" tsan.txt; then
+            echo "OK: the injected relaxed store was reported (exit $status)"
+          else
+            echo "::error::ThreadSanitizer did not report the injected bug"; exit 1
+          fi
 
   end-to-end:
     name: end-to-end on a synthetic feed
@@ -56,16 +93,26 @@ jobs:
         with: { python-version: "3.12" }
       - name: Build
         run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libboost-dev
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_BUILD_TESTS=OFF
           cmake --build build -j4
       - name: Generate feed
         run: ./build/feed_handler gen synthetic.itch --events 3000000 --seed 7 --stocks 64
-      - name: Count, golden, verify
+      - name: Count, golden, verify every queue
         run: |
           ./build/feed_handler count synthetic.itch --repeat 2
           ./build/feed_handler golden synthetic.itch --check-every 500000 --symbols SYM1,SYM2
-          ./build/feed_handler verify synthetic.itch --book fast --cpu-producer 0 --cpu-consumer 1
+          for q in $(./build/feed_handler queues); do
+            for cap in 1024 1048576; do
+              echo "== $q capacity $cap"
+              ./build/feed_handler verify synthetic.itch --book fast --queue $q --capacity $cap --cpu-producer 0 --cpu-consumer 1 | tail -1
+            done
+          done
           ./build/feed_handler verify synthetic.itch --book golden
+      - name: Queue stress (short)
+        run: |
+          ./build/queue_stress --queue all --capacity 4 --seconds 3
+          ./build/queue_stress --queue all --capacity 1024 --seconds 3 --delays
       - name: Bench and charts
         run: |
           pip install pandas matplotlib

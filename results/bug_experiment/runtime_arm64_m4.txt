@@ -1,0 +1,13 @@
+# Release build with FH_INJECT_ORDERING_BUG on Apple M4 (arm64), unpinned
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                   4      no       2784743424       46.4    2572990    1338995
+spsc                   4     yes       1859485696       31.0     214196     135163
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                  64      no      14788919296      246.5    2933300    3324560
+spsc                  64     yes       2153672704       35.9       3598        885
+NOTE: built with FH_INJECT_ORDERING_BUG (spsc publishes head with a relaxed store)
+spsc                1024      no      17422909440      290.4    2271726    2287864
+spsc                1024     yes       2299088896       38.3       3748        532
+# Control: correct build, same tests
+spsc                   4      no       1784664064       29.7          0          0
+spsc                  64      no       7770828800      129.5          0          0

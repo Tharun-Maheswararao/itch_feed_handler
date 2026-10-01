@@ -68,6 +68,9 @@ struct RunResult {
     bool paced = false;
     std::size_t ring_batch = 1;
     uint32_t sample_every = 1;
+    std::size_t queue_capacity = 0;
+    std::string queue_name = "spsc";  // set by the caller (the pipeline only knows the type)
+    std::string placement;       // free-form label, e.g. "cross-core"
 };
 
 // Mean book update over the sampled messages, in ns (0 if nothing was timed).
@@ -128,12 +131,22 @@ RunResult run_single(const uint8_t* begin, const uint8_t* end, Book& book, bool 
     return r;
 }
 
-// Two-thread pipeline over [begin, end).
-template <class Book>
+// Two-thread pipeline over [begin, end). Queue is any type with the
+// SpscQueue interface (try_push/push/flush, try_pop/pop, consumer_depth);
+// see fh/queue/queue_kinds.hpp for the ones benchmarked.
+template <class Queue = MsgQueue, class Book>
 RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, const PipelineOptions& opt) {
-    auto queue = std::make_unique<MsgQueue>();
+    auto queue = std::make_unique<Queue>();
     queue->set_batch(opt.ring_batch);
     RunResult r;
+    r.queue_capacity = Queue::capacity();
+    // Messages fully applied by the book thread. Written by the consumer
+    // only (its own cache line, so the store is cheap); the producer reads it
+    // once, to drain the ring before timestamp-paced replay starts.
+    struct alignas(kCacheLine) Counter {
+        std::atomic<uint64_t> v{0};
+    };
+    Counter consumed;
     r.paced = opt.rate > 0 || opt.speedup > 0;
     r.ring_batch = queue->batch();
     if (opt.sample_every == 0 || (opt.sample_every & (opt.sample_every - 1)) != 0)
@@ -173,6 +186,7 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                 apply(book, m);
             }
             ++n;
+            consumed.v.store(n, std::memory_order_relaxed);
             if (opt.verify) {
                 digest = chain_digest(digest, book.hash());
                 if (n % opt.checkpoint_every == 0) r.checkpoints.push_back(digest);
@@ -203,10 +217,16 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
         bool based = false;
         const uint64_t sample_mask = opt.sample_every - 1;
         uint64_t rng = 0x9E3779B97F4A7C15ull;
+        uint64_t pushed = 0;
 
         r.parse = parse_buffer(begin, end, [&](Msg& m) {
+            // With timestamp pacing, messages before pace_from only build the
+            // book (replayed at full speed, never timed): they would otherwise
+            // report backlog, not latency.
+            const bool in_window = !by_time || m.timestamp >= opt.pace_from_ns;
             // High bits of xorshift64 are the well-mixed ones.
-            const bool sampled = opt.measure_latency && (sample_mask == 0 || ((xorshift64(rng) >> 40) & sample_mask) == 0);
+            const bool sampled = opt.measure_latency && in_window &&
+                                 (sample_mask == 0 || ((xorshift64(rng) >> 40) & sample_mask) == 0);
             m.flags = sampled ? kMsgSampled : 0;
             if (by_rate) {
                 // Stamp with the scheduled arrival time, not the time we got
@@ -219,6 +239,10 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                 m.stamp = target;
             } else if (by_time && m.timestamp >= opt.pace_from_ns) {
                 if (!based) {
+                    // Drain the warm-up backlog so paced replay starts from
+                    // an empty ring, then start the clock.
+                    queue->flush();
+                    while (consumed.v.load(std::memory_order_acquire) < pushed) cpu_relax();
                     based = true;
                     base_tick = now_ticks();
                     base_ts = m.timestamp;
@@ -231,6 +255,7 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                 m.stamp = now_ticks();
             }
             queue->push(m);
+            ++pushed;
             if (r.paced) queue->flush();  // about to idle until the next arrival
         });
         Msg end_msg{};

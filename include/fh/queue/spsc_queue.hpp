@@ -16,6 +16,8 @@
 //    producer finds it full), and the producer calls flush() whenever it goes
 //    idle, so batching never stalls progress. k = 1 publishes after every
 //    message, the classic behaviour.
+//  * kPadded=false packs both sides' indices onto shared cache lines. That is
+//    the deliberately wrong layout, kept only to measure false sharing.
 #pragma once
 
 #include <algorithm>
@@ -30,7 +32,7 @@
 
 namespace fh {
 
-template <class T, std::size_t Capacity>
+template <class T, std::size_t Capacity, bool kPadded = true>
 class SpscQueue {
     static_assert(Capacity >= 2 && (Capacity & (Capacity - 1)) == 0,
                   "capacity must be a power of two");
@@ -103,7 +105,7 @@ public:
 
 private:
     template <class V>
-    struct alignas(kCacheLine) Padded {
+    struct alignas(kPadded ? kCacheLine : alignof(V)) Padded {
         V value{};
     };
     struct Producer {          // producer-private line
@@ -120,7 +122,14 @@ private:
     void publish_head() noexcept {
         Producer& p = prod_.value;
         if (p.published != p.head) {
+#if defined(FH_INJECT_ORDERING_BUG)
+            // DELIBERATE BUG (docs/DESIGN.md, "The deliberate bug"): without
+            // release, the slot write above may become visible after the new
+            // head, so the consumer can read a slot that is not written yet.
+            head_.value.store(p.head, std::memory_order_relaxed);
+#else
             head_.value.store(p.head, std::memory_order_release);
+#endif
             p.published = p.head;
         }
     }
@@ -138,7 +147,14 @@ private:
     Padded<Consumer> cons_;
     T* const slots_;
     std::size_t batch_ = 1;  // read-only once the threads run
-    char pad_[kCacheLine - sizeof(T*) - sizeof(std::size_t)];
+    char pad_[kPadded ? kCacheLine - sizeof(T*) - sizeof(std::size_t) : 1];
 };
+
+// Aliases with exactly two template parameters, so every queue type can be
+// passed to the same template-template parameter.
+template <class T, std::size_t Capacity>
+using SpscAligned = SpscQueue<T, Capacity, true>;
+template <class T, std::size_t Capacity>
+using SpscUnaligned = SpscQueue<T, Capacity, false>;
 
 }  // namespace fh

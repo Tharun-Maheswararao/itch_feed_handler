@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -41,10 +42,12 @@ public:
     const uint8_t* end() const { return data_ + size_; }
     size_t size() const { return size_; }
 
-    // Touch every page so the first timed run does not pay for page faults.
-    uint64_t prefault() const {
+    // Touch every page (of the first `limit` bytes) so the first timed run
+    // does not pay for page faults.
+    uint64_t prefault(size_t limit = SIZE_MAX) const {
         uint64_t sum = 0;
-        for (size_t i = 0; i < size_; i += 4096) sum += data_[i];
+        const size_t n = limit < size_ ? limit : size_;
+        for (size_t i = 0; i < n; i += 4096) sum += data_[i];
         return sum;
     }
 

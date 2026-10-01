@@ -16,15 +16,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "benchmark = official run + results PR; diagnose = pipeline-overhead experiments (artifact only)"
+        description: "benchmark = Stage A run + PR; matrix = Stage B queue matrix + PR; diagnose = overhead experiments (artifact only)"
         type: choice
         default: benchmark
-        options: [benchmark, diagnose]
+        options: [benchmark, matrix, diagnose]
       instance_type:
         description: EC2 instance type (needs >= 16 GB RAM so the day fits in page cache)
         type: choice
         default: c7i.2xlarge
-        options: [c7i.2xlarge, c7i.4xlarge, c7i.metal-24xl]
+        options: [c7i.2xlarge, c7i.4xlarge, c7i.metal-24xl, c7i.metal-48xl]
       rate:
         description: Paced replay rate, book messages per second
         default: "2000000"
@@ -34,6 +34,12 @@ on:
       sample_every:
         description: Time a random 1-in-N sample of messages (power of two; 1 = every message)
         default: "16"
+      matrix_queues:
+        description: "matrix: queues to run (blank = all built)"
+        default: ""
+      matrix_caps:
+        description: "matrix: capacities"
+        default: "1024 65536 1048576"
 
 permissions:
   id-token: write   # OIDC: assume the AWS role without stored keys
@@ -83,7 +89,7 @@ jobs:
           use-jit: true                 # single-use runner, deregisters after one job
           ec2-volume-size: 40           # 3.5 GB gz + 8.25 GB raw + build
           ec2-volume-type: gp3
-          startup-timeout-minutes: 10
+          startup-timeout-minutes: 20   # metal instances take longer to boot
           # Safety net: the instance powers itself off after 3 hours even if
           # every cleanup step below fails (a stopped instance costs no compute).
           pre-runner-script: |
@@ -97,10 +103,10 @@ jobs:
             ]
 
   benchmark:
-    name: ${{ inputs.mode == 'diagnose' && 'Diagnose' || 'Benchmark' }} on ${{ inputs.instance_type }}
+    name: ${{ inputs.mode }} on ${{ inputs.instance_type }}
     needs: start-runner
     runs-on: ${{ needs.start-runner.outputs.label }}
-    timeout-minutes: 150
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -109,7 +115,7 @@ jobs:
           SUDO=$(command -v sudo || true)
           export DEBIAN_FRONTEND=noninteractive
           $SUDO apt-get update -q
-          $SUDO apt-get install -y -q build-essential cmake curl \
+          $SUDO apt-get install -y -q build-essential cmake curl libboost-dev \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
           if [ "${{ inputs.mode }}" = diagnose ]; then
             # perf for hardware counters; best effort (package names vary by kernel)
@@ -148,6 +154,51 @@ jobs:
             --cpu-producer "${cores[1]}" --cpu-consumer "${cores[2]}" | tee "$RESULTS/logs/verify_full_day.txt"
           grep -q '^PASS' "$RESULTS/logs/verify_full_day.txt"
 
+      - name: Queue matrix (Stage B)
+        if: ${{ inputs.mode == 'matrix' }}
+        env:
+          OUT: results/matrix/${{ inputs.instance_type }}
+          DOCS: docs/matrix/${{ inputs.instance_type }}
+          RUNS: "3"
+          SAMPLE: ${{ inputs.sample_every }}
+          QUEUES: ${{ inputs.matrix_queues }}
+          CAPS: ${{ inputs.matrix_caps }}
+        run: |
+          [ -n "$QUEUES" ] || unset QUEUES
+          bench/run_matrix.sh data/12302019.NASDAQ_ITCH50
+          cat "$OUT/TABLE.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Book differential per queue (real data, until 12:00, pinned)
+        if: ${{ inputs.mode == 'matrix' }}
+        run: |
+          OUT=results/matrix/${{ inputs.instance_type }}
+          cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))
+          for q in $(build-bench/feed_handler queues); do
+            build-bench/feed_handler verify data/12302019.NASDAQ_ITCH50 --until 12:00:00 --queue $q --capacity 65536 \
+              --cpu-producer "${cores[1]}" --cpu-consumer "${cores[2]}" | tee "$OUT/logs/verify_$q.txt" | tail -1
+            grep -q '^PASS' "$OUT/logs/verify_$q.txt"
+          done
+
+      - name: Stress and deliberate-bug runtime test on x86
+        if: ${{ inputs.mode == 'matrix' }}
+        run: |
+          inst=${{ inputs.instance_type }}
+          cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))
+          pin=(--cpu-producer "${cores[1]}" --cpu-consumer "${cores[2]}")
+          cmake --build build-bench -j"$(nproc)" --target queue_stress >/dev/null
+          mkdir -p results/stress results/bug_experiment
+          { echo "# queue_stress on $inst ($(lscpu | sed -n 's/^Model name: *//p')), pinned ${cores[1]}/${cores[2]}"
+            build-bench/queue_stress --queue all --capacity 4 --seconds 60 "${pin[@]}"
+            build-bench/queue_stress --queue all --capacity 1024 --seconds 60 --delays "${pin[@]}"
+          } | tee "results/stress/linux_$inst.txt"
+          cmake -S . -B build-bug -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF -DFH_INJECT_ORDERING_BUG=ON >/dev/null 2>&1
+          cmake --build build-bug -j"$(nproc)" --target queue_stress >/dev/null
+          { echo "# Release build with FH_INJECT_ORDERING_BUG on $inst (x86-64), pinned"
+            for cap in 4 64 1024; do
+              build-bug/queue_stress --queue spsc --capacity $cap --seconds 60 "${pin[@]}" | grep -E "^spsc|NOTE"
+            done
+          } | tee "results/bug_experiment/runtime_x86_$inst.txt"
+
       - name: Diagnose pipeline overhead (pinned)
         if: ${{ inputs.mode == 'diagnose' }}
         env:
@@ -183,10 +234,21 @@ jobs:
             ${{ env.DOCS }}
           retention-days: 30
 
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.mode == 'matrix' }}
+        with:
+          name: linux-benchmark-${{ github.run_id }}
+          path: |
+            results/matrix
+            docs/matrix
+            results/stress
+            results/bug_experiment
+          retention-days: 30
+
   open-pr:
     name: Open pull request with results
     needs: benchmark
-    if: ${{ inputs.mode == 'benchmark' }}
+    if: ${{ inputs.mode == 'benchmark' || inputs.mode == 'matrix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -203,11 +265,13 @@ jobs:
           branch: benchmark/linux-${{ github.run_id }}
           base: main
           add-paths: |
-            ${{ env.RESULTS }}
-            ${{ env.DOCS }}
-          commit-message: "Linux benchmark results (${{ inputs.instance_type }}, run ${{ github.run_id }})"
-          title: "Linux benchmark results: ${{ inputs.instance_type }}"
-          body-path: ${{ env.RESULTS }}/SUMMARY.md
+            ${{ inputs.mode == 'matrix' && 'results/matrix' || env.RESULTS }}
+            ${{ inputs.mode == 'matrix' && 'docs/matrix' || env.DOCS }}
+            ${{ inputs.mode == 'matrix' && 'results/stress' || env.RESULTS }}
+            ${{ inputs.mode == 'matrix' && 'results/bug_experiment' || env.RESULTS }}
+          commit-message: "${{ inputs.mode == 'matrix' && 'Queue matrix' || 'Linux benchmark' }} results (${{ inputs.instance_type }}, run ${{ github.run_id }})"
+          title: "${{ inputs.mode == 'matrix' && 'Queue matrix' || 'Linux benchmark' }} results: ${{ inputs.instance_type }}"
+          body-path: ${{ inputs.mode == 'matrix' && format('results/matrix/{0}/TABLE.md', inputs.instance_type) || format('{0}/SUMMARY.md', env.RESULTS) }}
           delete-branch: true
 
   stop-runner:

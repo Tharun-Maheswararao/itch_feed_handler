@@ -7,9 +7,12 @@
 //                            [--rate MSGS_PER_SEC | --speedup X [--pace-from HH:MM:SS]]
 //                            [--cpu-producer N] [--cpu-consumer N] [--ring-batch K] [--no-latency]
 //                            [--sample-every N]   time a random 1-in-N sample (N a power of two)
+//                            [--queue spsc|spsc_unaligned|mutex|rigtorp|boost] [--capacity 1024|16384|65536|1048576]
+//                            [--placement LABEL]  recorded in the CSV (e.g. same-core, cross-core)
 //                            [--view SYMBOL [--view-interval-ms 1000] [--record FILE] [--no-draw]]
 //   feed_handler single FILE [--book fast|golden] [--cpu N] [--timed] [--until T]
 //   feed_handler gen    OUT  [--events N] [--seed S] [--stocks K]
+//   feed_handler queues      (lists the queue types built into this binary)
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -25,6 +28,7 @@
 #include "fh/book/golden_book.hpp"
 #include "fh/parser/mapped_file.hpp"
 #include "fh/pipeline.hpp"
+#include "fh/queue/queue_kinds.hpp"
 #include "fh/stats/report.hpp"
 #include "fh/testing/itch_writer.hpp"
 #include "fh/view/live_view.hpp"
@@ -266,12 +270,18 @@ int cmd_verify(const Args& a) {
         expect(inv_p, "pipeline book invariants");
         if (!inv_p) std::printf("      %s\n", err.c_str());
     };
+    const std::string qname = a.get("queue", "spsc");
+    const auto qcap = static_cast<std::size_t>(a.num("capacity", static_cast<double>(kRingCapacity)));
+    std::printf("      queue %s, capacity %zu\n", qname.c_str(), qcap);
+    auto run = [&](auto& book) {
+        return with_queue(qname, qcap, [&]<class Q>() { return run_pipeline<Q>(f.data(), end, book, opt); });
+    };
     if (which == "golden") {
         auto book = std::make_unique<GoldenBook<true>>();
-        check(run_pipeline(f.data(), end, *book, opt), *book);
+        check(run(*book), *book);
     } else {
         auto book = std::make_unique<FastBook<true>>(std::size_t{1} << static_cast<int>(a.num("order-capacity-log2", 23)));
-        check(run_pipeline(f.data(), end, *book, opt), *book);
+        check(run(*book), *book);
         std::printf("      order map grows: %llu\n", (unsigned long long)book->order_map_grows());
     }
     std::printf("%s\n", ok ? "PASS: pipeline book matches the golden model" : "FAIL");
@@ -283,11 +293,15 @@ int bench_with(const Args& a, Book* /*tag*/) {
     const SystemInfo si = collect_system_info();
     print_system(std::cout, si);
     MappedFile f(a.file());
-    std::printf("file     %s (%.2f GB), prefaulting ...\n", a.file().c_str(), static_cast<double>(f.size()) / 1e9);
-    f.prefault();
+    std::printf("file     %s (%.2f GB)\n", a.file().c_str(), static_cast<double>(f.size()) / 1e9);
     const uint8_t* end = stream_end(a, f);
+    f.prefault(static_cast<size_t>(end - f.data()));  // only what this run replays
 
     PipelineOptions opt = pipeline_options(a);
+    const std::string qname = a.get("queue", "spsc");
+    const auto qcap = static_cast<std::size_t>(a.num("capacity", static_cast<double>(kRingCapacity)));
+    std::printf("queue    %s (%s), capacity %zu slots%s\n", qname.c_str(), queue_version(qname).c_str(), qcap,
+                a.has("placement") ? (", placement " + a.get("placement")).c_str() : "");
     const int runs = static_cast<int>(a.num("runs", 5));
     const int warmup = static_cast<int>(a.num("warmup", 1));
     const std::string label = a.get("label", a.get("book", "fast"));
@@ -316,7 +330,10 @@ int bench_with(const Args& a, Book* /*tag*/) {
                                             i == runs - 1 ? a.get("record") : std::string(), !a.has("no-draw"));
             lv->start();
         }
-        RunRecord rec{i + 1, label, run_pipeline(f.data(), end, *book, opt)};
+        RunRecord rec{i + 1, label,
+                      with_queue(qname, qcap, [&]<class Q>() { return run_pipeline<Q>(f.data(), end, *book, opt); })};
+        rec.result.queue_name = qname;
+        rec.result.placement = a.get("placement");
         if (lv) lv->stop();
         if (i < 0) {
             std::printf("warmup %d done: %.2f s\n", i + warmup + 1, rec.result.wall_seconds);
@@ -417,6 +434,10 @@ int main(int argc, char** argv) {
         if (a.cmd == "bench") return cmd_bench(a);
         if (a.cmd == "gen") return cmd_gen(a);
         if (a.cmd == "single") return cmd_single(a);
+        if (a.cmd == "queues") {  // queue types compiled into this binary
+            for (const auto& q : queue_names()) std::printf("%s\n", q.c_str());
+            return 0;
+        }
         usage();
         return 2;
     } catch (const std::exception& e) {

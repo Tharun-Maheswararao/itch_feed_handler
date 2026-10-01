@@ -1,5 +1,7 @@
 #include "fh/stats/report.hpp"
 
+#include "fh/queue/queue_kinds.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -64,7 +66,7 @@ void print_message_mix(std::ostream& os, const ParseStats& st) {
 
 void print_run(std::ostream& os, const RunRecord& rec) {
     const RunResult& r = rec.result;
-    os << "Run " << rec.run << " [" << rec.label << "]"
+    os << "Run " << rec.run << " [" << rec.label << "]" << (r.queue_name != "spsc" ? "  queue " + r.queue_name : std::string())
        << (r.ring_batch > 1 ? "  ring batch " + std::to_string(r.ring_batch) : std::string())
        << (r.sample_every > 1 ? "  latency sampled 1/" + std::to_string(r.sample_every) : std::string()) << "  wall "
        << std::fixed << std::setprecision(3) << r.wall_seconds
@@ -140,7 +142,7 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
 
     std::ofstream s(dir + "/run_stats.csv");
     if (!s) throw std::runtime_error("cannot write " + dir + "/run_stats.csv");
-    s << "run,label,median,paced,ring_batch,sample_every,samples,depth_p50,depth_p99,depth_max,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
+    s << "run,label,queue,queue_version,capacity,placement,median,paced,ring_batch,sample_every,samples,depth_p50,depth_p99,depth_max,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
     for (const char* m : {"total", "queue", "book"}) {
         for (auto p : kPcts) s << ',' << m << '_' << p.name << "_ns";
         s << ',' << m << "_max_ns," << m << "_mean_ns";
@@ -152,7 +154,8 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
     for (std::size_t k = 0; k < runs.size(); ++k) {
         const auto& rec = runs[k];
         const RunResult& r = rec.result;
-        s << rec.run << ',' << csv_escape(rec.label) << ',' << (k == med) << ',' << r.paced << ','
+        s << rec.run << ',' << csv_escape(rec.label) << ',' << r.queue_name << ',' << csv_escape(queue_version(r.queue_name)) << ','
+          << r.queue_capacity << ',' << csv_escape(r.placement) << ',' << (k == med) << ',' << r.paced << ','
           << r.ring_batch << ',' << r.sample_every << ',' << r.total.count() << ',' << r.depth.percentile(0.5) << ','
           << r.depth.percentile(0.99) << ',' << r.depth.max() << ',' << r.wall_seconds << ',' << r.parse.messages << ',' << r.book_messages << ',' << msgs_per_sec(r.parse.messages, r.wall_seconds)
           << ',' << msgs_per_sec(r.book_messages, r.wall_seconds) << ',' << mean_book_update_ns(r);
