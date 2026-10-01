@@ -116,7 +116,7 @@ aws ec2 describe-instances --region us-east-1 --filters Name=tag:Project,Values=
 
 | Symptom | Fix |
 |---|---|
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The workflow must run from `main`, and `AWS_ROLE_ARN` must be the ARN printed by the setup script |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The OIDC subject in the role's trust policy must match what GitHub sends. Check with `gh api repos/OWNER/REPO/actions/oidc/customization/sub`: repos with `use_immutable_subject` send `repo:OWNER@ID/REPO@ID:ref:refs/heads/main`. Re-running `setup_aws.sh` writes the right one. The workflow must also run from `main`, and `AWS_ROLE_ARN` must be the ARN the script printed |
 | `VcpuLimitExceeded` | Request the quota increase printed by the setup script |
 | `UnauthorizedOperation` on `RunInstances` | The instance type is not in the allowed list in `permissions-policy.json`. Add it and re-run `setup_aws.sh` |
 | `InsufficientInstanceCapacity` | Retry later, or re-run the setup script with `INSTANCE_TYPE=c7i.4xlarge` to choose a subnet in a different AZ |

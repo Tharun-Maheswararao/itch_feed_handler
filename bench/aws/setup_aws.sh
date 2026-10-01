@@ -38,7 +38,21 @@ else
 fi
 
 # 2. IAM role (trust: this repo, main branch only) + least-privilege policy
-sed -e "s/ACCOUNT_ID/$ACCOUNT/g" -e "s#GITHUB_REPO#$REPO#g" "$DIR/trust-policy.json" >"$TMP/trust.json"
+#
+# The OIDC subject GitHub sends depends on the repo's settings. Repos using
+# immutable subjects send "repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:..." (IDs
+# survive renames, so a re-registered name cannot take over the role); older
+# repos send "repo:OWNER/REPO:ref:...". Ask GitHub which one applies.
+SUB_PREFIX=""
+if command -v gh >/dev/null 2>&1; then
+  SUB_PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null || true)
+fi
+if [[ -z "$SUB_PREFIX" ]]; then
+  SUB_PREFIX="repo:$REPO"
+  echo "== could not read the repo's OIDC subject format via gh; assuming $SUB_PREFIX"
+fi
+echo "== trusting OIDC subject $SUB_PREFIX:ref:refs/heads/main"
+sed -e "s/ACCOUNT_ID/$ACCOUNT/g" -e "s#GITHUB_SUB_PREFIX#$SUB_PREFIX#g" "$DIR/trust-policy.json" >"$TMP/trust.json"
 sed -e "s/ACCOUNT_ID/$ACCOUNT/g" -e "s/REGION/$REGION/g" "$DIR/permissions-policy.json" >"$TMP/perms.json"
 if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
   aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "file://$TMP/trust.json"
