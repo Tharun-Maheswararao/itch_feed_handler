@@ -1,0 +1,14 @@
+[1/3] golden model, single thread ...
+      263250843 book msgs, 86.73 s, digest 1f3f7b7bcfdf76de
+[2/3] two-thread pipeline with fast book ...
+      263250843 book msgs, 85.11 s, digest 1f3f7b7bcfdf76de
+[3/3] comparing ...
+      message counts by type                                     OK
+      book message count                                         OK
+      per-message hash chain checkpoints (251)                   OK
+      final per-message hash chain digest                        OK
+      full book state (0 live orders, every level)               OK
+      golden invariants                                          OK
+      pipeline book invariants                                   OK
+      order map grows: 0
+PASS: pipeline book matches the golden model
