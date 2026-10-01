@@ -256,16 +256,64 @@ untimed.
   burst fills every ring, and Rigtorp's p99 rises to 737 µs and Boost's to
   3.3 ms. This repo's ring held 16.6–31.6 µs in two of three runs (one run:
   1.72 ms). Past 64K there is little further gain.
-* Cross-socket placement needs a 2-socket host; that run is pending.
+* **Across sockets the gap widens** (bare-metal 2-socket run below): this
+  ring loses 18%, Rigtorp 38% and Boost 43%, so its lead grows to +55% over
+  Rigtorp and +94% over Boost. The more expensive a cross-core cache miss,
+  the more the design matters (`perf c2c` explains why, below).
 
-Why each queue behaves as it does, from reading their code:
-[DESIGN.md §14](docs/DESIGN.md#14-design-comparison-rigtorp-and-boost).
+Why each queue behaves as it does, from reading their code and profiling the
+hot cache line: [DESIGN.md section 14](docs/DESIGN.md#14-design-comparison-rigtorp-and-boost).
 
 ![Percentiles: four queues](docs/matrix/c7i.2xlarge/queue_percentiles.png)
 ![Latency CDF: four queues](docs/matrix/c7i.2xlarge/queue_cdf.png)
 ![False sharing: padded vs unpadded indices](docs/matrix/c7i.2xlarge/alignment.png)
 ![Thread placement](docs/matrix/c7i.2xlarge/placement.png)
 ![Ring capacity](docs/matrix/c7i.2xlarge/capacity.png)
+
+### Same core, different cores, different sockets (bare metal, 2 sockets)
+
+`c7i.metal-48xl`: 2 × 48-core Xeon Platinum 8488C, no hypervisor, 64K slots,
+median of 3 runs ([table](results/matrix/c7i.metal-48xl/TABLE.md)). "Same
+core" is the two hyperthreads of one physical core; "cross-socket" puts the
+consumer on the other CPU package, so every cache-line transfer crosses the
+socket interconnect.
+
+| Unpaced throughput | same core | different cores | different sockets | cost of crossing sockets |
+|---|---:|---:|---:|---:|
+| **spsc (this repo)** | 9.05 M/s | **9.37 M/s** | **7.65 M/s** | −18% |
+| rigtorp | **9.30 M/s** | 7.89 M/s | 4.93 M/s | −38% |
+| boost | 9.08 M/s | 6.94 M/s | 3.94 M/s | −43% |
+| spsc, unpadded | 8.33 M/s | 6.56 M/s | 3.75 M/s | −43% |
+| mutex | 3.68 M/s | 2.11 M/s | 2.07 M/s | −2% |
+
+| Paced at the open, p50 / p99 | same core | different cores | different sockets |
+|---|---:|---:|---:|
+| **spsc (this repo)** | 246 ns / 12.2 µs | **506 ns / 7.68 µs** | **1.25 µs / 328 µs** |
+| rigtorp | 240 ns / 11.7 µs | 626 ns / 7.89 µs | 1.76 µs / 478 µs |
+| boost | 240 ns / 12.4 µs | 573 ns / 12.8 µs | 1.60 µs / 85.6 ms |
+| spsc, unpadded | 246 ns / 13.2 µs | 733 ns / 1.91 ms | 2.24 µs / 94.4 ms |
+| mutex | 1.97 µs / 7.65 ms | 6.29 µs / 182 ms | 9.81 µs / 292 ms |
+
+* **On one core all four lock-free queues are equal** (9.05–9.30 M/s, p50
+  about 240 ns), because the hyperthreads share an L1 and "cross-core"
+  traffic never leaves the core. The design differences only show once
+  cache lines have to travel.
+* **This ring's lead grows with the distance a cache line travels**: about 0%
+  on one core, +19% across cores, +55% across sockets over Rigtorp.
+  `perf c2c` on the same host found why: Rigtorp re-reads its *own* index
+  from the shared, contended cache line on every operation (98 of 101 such
+  sampled loads were cross-core misses, about 340 cycles each), while this
+  ring keeps a private copy and only *stores* to the shared line
+  ([reports](results/matrix/c7i.metal-48xl/c2c), DESIGN.md section 14).
+* **False sharing is worse across sockets**: −30% across cores, −51% across
+  sockets.
+* **Bare metal is faster than the VM on the same CPU model** (9.37 against
+  7.10 M/s for this ring across cores) and its same-core tail is far better
+  (12 µs against about 2 ms on the VM), so the VM's same-core penalty was
+  mostly the hypervisor and its neighbours, not hyperthreading itself.
+
+![Thread placement, bare metal](docs/matrix/c7i.metal-48xl/placement.png)
+![False sharing, bare metal](docs/matrix/c7i.metal-48xl/alignment.png)
 
 Rebuild everything with `bench/run_matrix.sh data/12302019.NASDAQ_ITCH50`, or
 on EC2 with the [Linux benchmark workflow](.github/workflows/benchmark.yml)

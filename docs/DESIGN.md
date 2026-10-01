@@ -418,39 +418,54 @@ repo's (983 µs against 21.3 µs). There is also a smaller, avoidable cost here:
 `capacity<65535>` would give Boost its fast path. The matrix keeps the same
 nominal capacity for all four queues, as the comparison rules require.
 
-**Rigtorp against this repo: almost the same design, and a result I have not
-fully explained.** The memory ordering is identical, both cache the other
-index, and both pad each index to its own line. Across cores this repo's ring
-is 17% faster in every run (7.09–7.12 against 6.06–6.08 M/s) and holds its
-tail far better in a 1K ring under burst (two runs of three at 17–32 µs
-against Rigtorp's 680–790 µs). On one core Rigtorp is slightly *ahead*
-(6.73 against 6.60 M/s at 64K). Since the gap appears only when the
-indices cross cores, it is a cache-coherence effect rather than an
-instruction-count one. The differences that can affect coherence are:
+**Rigtorp against this repo: almost the same design, and one difference that
+matters.** The memory ordering is identical, both cache the other index, and
+both pad each index to its own line. Yet the results depend on where the
+threads run:
 
-1. **Index representation.** Rigtorp's indices wrap at capacity, mine are
-   64-bit counters that never wrap. Both publish one store per operation, so
-   this should not change traffic, but it changes the full test (one slack
-   slot against none) and so how often a full ring forces a refresh.
-2. **Slot array placement.** Mine starts on a cache-line boundary; Rigtorp's
-   starts `kPadding` slots into a `std::allocator` block. With 48-byte
-   slots, that shifts which slots share a line, which matters when the ring
-   is full and the producer writes the slot just behind the one the consumer
-   is reading.
-3. **Producer reads of its own index.** Rigtorp reloads `writeIdx_` (the
-   shared line the consumer polls) at the start of every push; mine reads a
-   private copy and only *stores* to the shared line.
+| Unpaced, 64K slots | same core | different cores | different sockets |
+|---|---:|---:|---:|
+| this repo, VM (`c7i.2xlarge`) | 6.60 M/s | 7.10 M/s | n/a |
+| Rigtorp, VM | 6.73 M/s | 6.08 M/s (−14%) | n/a |
+| this repo, bare metal (`c7i.metal-48xl`) | 9.05 M/s | 9.37 M/s | 7.65 M/s |
+| Rigtorp, bare metal | 9.30 M/s | 7.89 M/s (−16%) | 4.93 M/s (−36%) |
 
-I have not isolated which of these accounts for the 17%. The measurement
-that would is `perf c2c` (cache-to-cache transfer counts per cache line),
-which needs precise load-latency sampling (Intel PEBS). On the
-`c7i.2xlarge` VM even basic cache events were unavailable: `perf stat` reported
-`LLC-load-misses` as `<not supported>` and `cache-misses` as 0 in the Stage A
-diagnosis run. Bare metal exposes the full PMU, so the 2-socket metal run is
-the place to take it. The honest
-conclusion today: on a Xeon, across cores, this ring is faster than Rigtorp's
-for this workload, by a margin that is consistent across runs, and the
-mechanism is not yet proven.
+On one core Rigtorp is slightly *ahead*. The gap appears only when cache
+lines travel, and it grows with the distance. That pointed to coherence
+rather than instruction count, and `perf c2c` on the bare-metal host,
+cross-core, unpaced, 64K slots ([reports](../results/matrix/c7i.metal-48xl/c2c)),
+confirms it:
+
+| | this repo | Rigtorp |
+|---|---:|---:|
+| instructions | 16.7 B | 16.4 B |
+| cycles | 32.1 B | **38.3 B (+19%)** |
+| loads blocked by data | 366 | **1,110 (3.0×)** |
+| sampled loads on the hottest cache line | 3,104 | **6,066 (2.0×)** |
+| … loads of that line *by the thread that writes it* | **1** | **101**, 98 of them HITM at ~340 cycles |
+
+The same work takes 19% more cycles, so the difference is stall time. In
+both queues one ring index carries almost all the cross-core traffic (83%
+and 95% of HITMs): in a full ring the producer is polling the consumer's
+index. The difference is what the *owner* of that index does. Rigtorp
+re-reads its own index from the shared line at the start of every operation
+(`writeIdx_.load(relaxed)` in `try_emplace`, `readIdx_.load(relaxed)` in
+`front()` and again in `pop()`). Because the other core is polling that line,
+the line has usually just been pulled into the other cache, so the owner's
+own-index load becomes a cross-core miss (a HITM), on the critical path,
+every time. This ring keeps the owner's copy in a private line
+(`Producer::head`, `Consumer::tail`) and only ever *stores* to the shared
+line. A store retires into the store buffer and does not stall the thread,
+while a load that misses does.
+
+That one choice also explains the pattern across placements. On one core the
+"other cache" is the sibling hyperthread's shared L1, so the miss is cheap and
+the gap vanishes. Across cores it costs an L2-to-L2 transfer through the mesh
+(19%), and across sockets a trip over the socket interconnect (55%). The
+other differences in the table above (index representation, slot-array
+placement) are not needed to explain it. This is a profile of one
+configuration, not a proof that nothing else contributes, but every signal
+points the same way.
 
 **What I would take from them.** Rigtorp's end padding of the slot array is
 a real improvement this ring lacks: neighbouring heap data can share the
