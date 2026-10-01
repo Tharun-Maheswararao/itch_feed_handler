@@ -1,0 +1,210 @@
+# Pinned Linux benchmark on a temporary EC2 instance.
+#
+# Run it from the Actions tab ("Linux benchmark" -> "Run workflow"). It:
+#   1. launches an EC2 instance and registers it as a single-use runner,
+#   2. downloads the Nasdaq day, runs bench/run_benchmark.sh with pinned cores
+#      and the full-day golden-model check,
+#   3. uploads results as an artifact and opens a pull request with them,
+#   4. terminates the instance, even if anything above failed.
+#
+# One-time AWS and GitHub setup: docs/AWS_BENCHMARK.md.
+name: Linux benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_type:
+        description: EC2 instance type (needs >= 16 GB RAM so the day fits in page cache)
+        type: choice
+        default: c7i.2xlarge
+        options: [c7i.2xlarge, c7i.4xlarge, c7i.metal-24xl]
+      rate:
+        description: Paced replay rate, book messages per second
+        default: "2000000"
+      runs:
+        description: Timed runs per configuration (after one warmup)
+        default: "5"
+
+permissions:
+  id-token: write   # OIDC: assume the AWS role without stored keys
+  contents: read
+
+concurrency:
+  group: linux-benchmark   # never two instances at once
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  RESULTS: results/linux
+  DOCS: docs/linux
+
+jobs:
+  start-runner:
+    name: Start EC2 runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start.outputs.label }}
+      ec2-instance-id: ${{ steps.start.outputs.ec2-instance-id }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve latest Ubuntu 24.04 AMI
+        id: ami
+        run: |
+          ami=$(aws ssm get-parameter \
+            --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
+            --query Parameter.Value --output text)
+          echo "Using $ami"
+          echo "id=$ami" >> "$GITHUB_OUTPUT"
+
+      - name: Start EC2 runner
+        id: start
+        uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_RUNNER_PAT }}
+          ec2-image-id: ${{ steps.ami.outputs.id }}
+          ec2-instance-type: ${{ inputs.instance_type }}
+          subnet-id: ${{ secrets.AWS_SUBNET_ID }}
+          security-group-id: ${{ secrets.AWS_SECURITY_GROUP_ID }}
+          use-jit: true                 # single-use runner, deregisters after one job
+          ec2-volume-size: 40           # 3.5 GB gz + 8.25 GB raw + build
+          ec2-volume-type: gp3
+          startup-timeout-minutes: 10
+          # Safety net: the instance powers itself off after 3 hours even if
+          # every cleanup step below fails (a stopped instance costs no compute).
+          pre-runner-script: |
+            shutdown -h +180 "itch benchmark safety timeout" || true
+          aws-resource-tags: >
+            [
+              {"Key": "Name", "Value": "itch-benchmark-runner"},
+              {"Key": "Project", "Value": "itch-feed-handler-benchmark"},
+              {"Key": "GitHubRepository", "Value": "${{ github.repository }}"},
+              {"Key": "GitHubRunId", "Value": "${{ github.run_id }}"}
+            ]
+
+  benchmark:
+    name: Benchmark on ${{ inputs.instance_type }}
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install toolchain
+        run: |
+          SUDO=$(command -v sudo || true)
+          export DEBIAN_FRONTEND=noninteractive
+          $SUDO apt-get update -q
+          $SUDO apt-get install -y -q build-essential cmake curl \
+            python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
+
+      - name: Host
+        run: |
+          lscpu
+          free -g
+          g++ --version | head -1
+          cmake --version | head -1
+
+      - name: Download the Nasdaq ITCH day (3.5 GB)
+        run: |
+          mkdir -p data
+          curl -fSL --retry 5 --retry-delay 10 -o data/12302019.NASDAQ_ITCH50.gz \
+            "https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz"
+          gunzip -f data/12302019.NASDAQ_ITCH50.gz   # fails on a corrupt download (CRC)
+          ls -l data
+
+      - name: Benchmark (pinned cores, full day)
+        env:
+          RATE: ${{ inputs.rate }}
+          RUNS: ${{ inputs.runs }}
+        run: bench/run_benchmark.sh data/12302019.NASDAQ_ITCH50
+
+      - name: Golden-model check (full day, pinned)
+        run: |
+          cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))
+          build-bench/feed_handler verify data/12302019.NASDAQ_ITCH50 --book fast \
+            --cpu-producer "${cores[1]}" --cpu-consumer "${cores[2]}" | tee "$RESULTS/logs/verify_full_day.txt"
+          grep -q '^PASS' "$RESULTS/logs/verify_full_day.txt"
+
+      - name: Summary
+        run: |
+          python3 scripts/summarize_results.py --results "$RESULTS" \
+            --title "Linux benchmark: ${{ inputs.instance_type }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --docs "$DOCS" \
+            > "$RESULTS/SUMMARY.md"
+          cat "$RESULTS/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-benchmark-${{ github.run_id }}
+          path: |
+            ${{ env.RESULTS }}
+            ${{ env.DOCS }}
+          retention-days: 30
+
+  open-pr:
+    name: Open pull request with results
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-benchmark-${{ github.run_id }}
+          path: .
+
+      # The PAT (not GITHUB_TOKEN) opens the PR so that CI runs on it.
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GH_RUNNER_PAT }}
+          branch: benchmark/linux-${{ github.run_id }}
+          base: main
+          add-paths: |
+            ${{ env.RESULTS }}
+            ${{ env.DOCS }}
+          commit-message: "Linux benchmark results (${{ inputs.instance_type }}, run ${{ github.run_id }})"
+          title: "Linux benchmark results: ${{ inputs.instance_type }}"
+          body-path: ${{ env.RESULTS }}/SUMMARY.md
+          delete-branch: true
+
+  stop-runner:
+    name: Terminate EC2 runner
+    needs: [start-runner, benchmark]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Stop EC2 runner
+        if: ${{ needs.start-runner.outputs.ec2-instance-id != '' }}
+        continue-on-error: true
+        uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_RUNNER_PAT }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+
+      # Backstop: terminate anything this run launched, even if the start step
+      # failed after creating the instance (its id would then be unknown).
+      - name: Terminate any instance tagged with this run
+        run: |
+          ids=$(aws ec2 describe-instances \
+            --filters "Name=tag:GitHubRunId,Values=${{ github.run_id }}" \
+                      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -n "$ids" ]; then
+            echo "terminating: $ids"
+            aws ec2 terminate-instances --instance-ids $ids >/dev/null
+          else
+            echo "nothing left running for run ${{ github.run_id }}"
+          fi

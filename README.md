@@ -119,6 +119,13 @@ replays the **full day** in every configuration. It writes the CPU model, core
 count, compiler, flags and clock to every CSV row and regenerates every chart
 in `docs/`.
 
+**Or let GitHub Actions do it.** The [Linux benchmark](.github/workflows/benchmark.yml)
+workflow launches a temporary EC2 instance, runs all of the above with pinned
+cores, uploads the results as an artifact, opens a pull request adding
+`results/linux/` and `docs/linux/`, and always terminates the instance. It
+costs about $0.50 per run. One-time AWS setup:
+[docs/AWS_BENCHMARK.md](docs/AWS_BENCHMARK.md).
+
 
 ## Architecture
 
@@ -216,7 +223,8 @@ include/fh/pipeline.hpp   two-thread pipeline and single-thread reference run
 src/                 CLI, report, sysinfo, live view
 tests/               GoogleTest suites
 bench/               micro-benchmarks, one-command benchmark script
-scripts/             plot_results.py (charts), make_gif.py (README GIF)
+scripts/             plot_results.py (charts), make_gif.py (README GIF), summarize_results.py
+bench/aws/           one-time AWS setup for the EC2 benchmark workflow
 docs/                charts, GIF, design document
 results/             CSV output and logs from the runs shown above
 ```
