@@ -1,6 +1,7 @@
 # ITCH 5.0 feed handler, Stage A
 
 ![Live AAPL book replayed from the 30 Dec 2019 Nasdaq feed](docs/live_book.gif)
+[![CI](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/workflows/ci.yml/badge.svg)](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/workflows/ci.yml)
 
 This program replays a full trading day of real Nasdaq TotalView-ITCH 5.0 data
 (**268,744,780 messages, 8.25 GB**) through a two-thread pipeline: a parser, a
@@ -100,7 +101,7 @@ RAM, so the whole day stays in page cache:
 
 ```bash
 sudo dnf install -y gcc-c++ cmake git python3-pip && pip3 install pandas matplotlib pillow
-git clone <this repo> && cd itch_feed_handler
+git clone https://github.com/Tharun-Maheswararao/itch_feed_handler.git && cd itch_feed_handler
 curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz" && gunzip -k data/12302019.NASDAQ_ITCH50.gz
 sudo cpupower frequency-set -g performance   # optional: stable clocks
 bench/run_benchmark.sh data/12302019.NASDAQ_ITCH50
