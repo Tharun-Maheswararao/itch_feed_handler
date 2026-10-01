@@ -1,0 +1,103 @@
+=================================================
+            Trace Event Information              
+=================================================
+  Total records                     :      58530
+  Locked Load/Store Operations      :         84
+  Load Operations                   :      18728
+  Loads - uncacheable               :          0
+  Loads - IO                        :          0
+  Loads - Miss                      :          0
+  Loads - no mapping                :          0
+  Load Fill Buffer Hit              :       3713
+  Load L1D hit                      :       9927
+  Load L2D hit                      :        304
+  Load LLC hit                      :       4425
+  Load Local HITM                   :       3504
+  Load Remote HITM                  :          0
+  Load Remote HIT                   :          0
+  Load Local DRAM                   :        354
+  Load Remote DRAM                  :          5
+  Load MESI State Exclusive         :          5
+  Load MESI State Shared            :        354
+  Load LLC Misses                   :        359
+  Load access blocked by data       :        366
+  Load access blocked by address    :        794
+  Load HIT Local Peer               :          0
+  Load HIT Remote Peer              :          0
+  LLC Misses to Local DRAM          :       98.6%
+  LLC Misses to Remote DRAM         :        1.4%
+  LLC Misses to Remote cache (HIT)  :        0.0%
+  LLC Misses to Remote cache (HITM) :        0.0%
+  Store Operations                  :      20378
+  Store - uncacheable               :          0
+  Store - no mapping                :          0
+  Store L1D Hit                     :      19648
+  Store L1D Miss                    :          0
+  Store No available memory level   :          0
+  No Page Map Rejects               :         19
+  Unable to parse data source       :      19424
+
+=================================================
+    Global Shared Cache Line Event Information   
+=================================================
+  Total Shared Cache Lines          :        357
+  Load HITs on shared lines         :       3956
+  Fill Buffer Hits on shared lines  :        417
+  L1D hits on shared lines          :          1
+  L2D hits on shared lines          :          0
+  LLC hits on shared lines          :       3538
+  Load hits on peer cache or nodes  :          0
+  Locked Access on shared lines     :          0
+  Blocked Access on shared lines    :          4
+  Store HITs on shared lines        :        827
+  Store L1D hits on shared lines    :        665
+  Store No available memory level   :          0
+  Total Merged records              :       4331
+
+=================================================
+                 c2c details                     
+=================================================
+  Events                            : cpu/mem-loads-aux/
+                                    : cpu/mem-loads,ldlat=30/
+                                    : cpu/mem-stores/P
+  Cachelines sort on                : Total HITMs
+  Cacheline data grouping           : offset,tid,iaddr
+
+=================================================
+           Shared Data Cache Line Table          
+=================================================
+#
+#        ----------- Cacheline ----------      Tot  ------- Load Hitm -------    Total    Total    Total  --------- Stores --------  ----- Core Load Hit -----  - LLC Load Hit --  - RMT Load Hit --  --- Load Dram ----
+# Index             Address  Node  PA cnt     Hitm    Total  LclHitm  RmtHitm  records    Loads   Stores    L1Hit   L1Miss      N/A       FB       L1       L2    LclHit  LclHitm    RmtHit  RmtHitm       Lcl       Rmt
+# .....  ..................  ....  ......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  ........  .......  ........  .......  ........  ........
+#
+      0      0x560c3496dc80     0       1   83.42%     2923     2923        0     3297     3104      335      193        0        0      181        0        0         0     2923         0        0         0         0
+      1      0x560c3496dd00     0     182    3.71%      130      130        0      381      381        0        0        0        0      216        1        0        34      130         0        0         0         0
+      2      0x560c3496dc00     0       1    2.63%       92       92        0      578      109      484      469        0        0       17        0        0         0       92         0        0         0         0
+
+=================================================
+      Shared Cache Line Distribution Pareto      
+=================================================
+#
+#        ----- HITM -----  ------- Store Refs ------  --------- Data address ---------                                            ---------- cycles ----------    Total       cpu                                                                                                                                                                                                                                                                                Shared                                                                                                                                                                                                                                                                               
+#   Num  RmtHitm  LclHitm   L1 Hit  L1 Miss      N/A              Offset  Node  PA cnt                   Tid        Code address  rmt hitm  lcl hitm      load  records       cnt                                                                                                                                                                                                                                                                  Symbol        Object                                                                                                                                                                                                                                                              Source:Line  Node
+# .....  .......  .......  .......  .......  .......  ..................  ....  ......  ....................  ..................  ........  ........  ........  .......  ........  ......................................................................................................................................................................................................................................................................  ............  .......................................................................................................................................................................................................................................................................  ....
+#
+  ----------------------------------------------------------------------
+      0        0     2923      193        0        0      0x560c3496dc80
+  ----------------------------------------------------------------------
+           0.00%  100.00%    0.00%    0.00%    0.00%                 0x0     0       1     6725:feed_handler      0x560c11dbb2d1         0       443       293     3104         1  [.] fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const                                                       feed_handler  fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const+1201                                                        0
+           0.00%    0.00%  100.00%    0.00%    0.00%                 0x0     0       1     6724:feed_handler      0x560c11dced7c         0         0         0      193         1  [.] std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()  feed_handler  std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()+1228   0
+
+  ----------------------------------------------------------------------
+      1        0      130        0        0        0      0x560c3496dd00
+  ----------------------------------------------------------------------
+           0.00%   98.46%    0.00%    0.00%    0.00%                 0x0     0       1     6725:feed_handler      0x560c11dbb1e5         0       324       261      173         1  [.] fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const                                                       feed_handler  fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const+965                                                         0
+           0.00%    1.54%    0.00%    0.00%    0.00%                 0x8     0       1     6725:feed_handler      0x560c11dbb20b         0       355       304      139         1  [.] fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const                                                       feed_handler  fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const+1003                                                        0
+
+  ----------------------------------------------------------------------
+      2        0       92      469        0        0      0x560c3496dc00
+  ----------------------------------------------------------------------
+           0.00%   98.91%    0.00%    0.00%    0.00%                 0x0     0       1     6724:feed_handler      0x560c11dcebd5         0       432       339      108         1  [.] std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()  feed_handler  std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()+805    0
+           0.00%    1.09%    0.00%    0.00%    0.00%                 0x0     0       1     6724:feed_handler      0x560c11dcedf4         0       381         0        1         1  [.] std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()  feed_handler  std::thread::_State_impl<std::thread::_Invoker<std::tuple<fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#1}> > >::_M_run()+1348   0
+           0.00%    0.00%  100.00%    0.00%    0.00%                 0x0     0       1     6725:feed_handler      0x560c11dbb219         0         0         0      469         1  [.] fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const                                                       feed_handler  fh::run_pipeline<fh::SpscQueue<fh::Msg, 65536ul, true>, fh::FastBook<false> >(unsigned char const*, unsigned char const*, fh::FastBook<false>&, fh::PipelineOptions const&)::{lambda()#2}::operator()() const+1017                                                        0

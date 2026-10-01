@@ -1,0 +1,39 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (96 physical / 192 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.002 MHz (0.42 ns per tick, measured resolution 6.67 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    spsc (this repo), capacity 65536 slots
+Run 1 [c2c_spsc]  latency sampled 1/16  wall 4.239 s   9.32 M file msgs/s   8.97 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 113.0 ns   ring depth at samples p50 65535 p99 65536 max 65536
+  latency         p50        p90        p99       p999        max       mean
+  total       7.65 ms    8.08 ms    9.39 ms   13.31 ms   13.31 ms    7.29 ms
+  queue       7.65 ms    8.08 ms    9.39 ms   13.31 ms   13.31 ms    7.29 ms
+  book          95 ns     206 ns     400 ns     786 ns  277.34 us     113 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 1
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.metal-48xl/c2c/run_spsc/histogram.csv and results/matrix/c7i.metal-48xl/c2c/run_spsc/run_stats.csv
+[ perf record: Woken up 22 times to write data ]
+[ perf record: Captured and wrote 5.443 MB results/matrix/c7i.metal-48xl/c2c/c2c_spsc.data (58530 samples) ]

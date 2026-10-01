@@ -1,0 +1,51 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (96 physical / 192 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.001 MHz (0.42 ns per tick, measured resolution 6.67 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 09:33:00: 0.37 of 8.25 GB
+queue    rigtorp (rigtorp/SPSCQueue@1053918), capacity 65536 slots, placement cross-core
+warmup 1 done: 18.49 s
+Run 1 [rigtorp_65536_cross-core_paced_itch]  queue rigtorp  latency sampled 1/16  wall 18.489 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 121.8 ns   ring depth at samples p50 0 p99 65 max 1442
+  latency         p50        p90        p99       p999        max       mean
+  total        626 ns    2.93 us    8.11 us   73.39 us  465.87 us    1.51 us
+  queue        493 ns    2.83 us    8.11 us   73.39 us  464.98 us    1.39 us
+  book         120 ns     220 ns     413 ns    1.01 us    7.99 us     122 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 2 [rigtorp_65536_cross-core_paced_itch]  queue rigtorp  latency sampled 1/16  wall 18.488 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 122.0 ns   ring depth at samples p50 0 p99 62 max 856
+  latency         p50        p90        p99       p999        max       mean
+  total        626 ns    2.88 us    7.89 us   64.85 us  505.20 us    1.38 us
+  queue        493 ns    2.77 us    7.89 us   64.85 us  505.07 us    1.25 us
+  book         120 ns     220 ns     426 ns    1.07 us    8.62 us     122 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+Run 3 [rigtorp_65536_cross-core_paced_itch]  queue rigtorp  latency sampled 1/16  wall 18.488 s   0.59 M file msgs/s   0.52 M book msgs/s
+  book msgs 9546704   timed 261056   mean book update 121.7 ns   ring depth at samples p50 0 p99 62 max 859
+  latency         p50        p90        p99       p999        max       mean
+  total        626 ns    2.83 us    7.89 us   59.73 us  527.89 us    1.35 us
+  queue        493 ns    2.72 us    7.89 us   59.73 us  523.98 us    1.23 us
+  book         120 ns     220 ns     420 ns     933 ns   67.33 us     122 ns
+  book: adds 4900085  exec 102047  cancel 547528  delete 3197229  replace 790909  live 1633065  peak 1636266  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 3
+Message mix (10887405 messages, 0.37 GB)
+  A       4110287   37.75%
+  D       3197229   29.37%
+  I       1073085    9.86%
+  U        790909    7.26%
+  F        789798    7.25%
+  X        547528    5.03%
+  L        215089    1.98%
+  E         99793    0.92%
+  P         25802    0.24%
+  Y          8911    0.08%
+  R          8906    0.08%
+  Q          8906    0.08%
+  H          8901    0.08%
+  C          2254    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.metal-48xl/rigtorp_65536_cross-core_paced_itch/histogram.csv and results/matrix/c7i.metal-48xl/rigtorp_65536_cross-core_paced_itch/run_stats.csv
