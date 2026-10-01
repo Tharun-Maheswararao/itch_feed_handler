@@ -1,0 +1,17 @@
+# queue_stress long run on Apple M4, macOS 15.6.1, started 2026-10-01T18:07Z
+queue           capacity  delays            items    M ops/s    seq_err payload_err
+spsc                   4      no      27188330496       30.2          0          0
+spsc_unaligned         4      no      11809210368        4.1          0          0
+# note: spsc_unaligned capacity-4 throughput above is invalid: the Mac idle-slept 14:41-15:18 during it (correctness result unaffected). caffeinate attached from 19:21Z.
+mutex                  4      no       1694236672        1.9          0          0
+rigtorp                4      no      27875708928       31.0          0          0
+boost                  4      no      18956632064       21.1          0          0
+# capacity 1024, random delays on both sides
+queue           capacity  delays            items    M ops/s    seq_err payload_err
+spsc                1024     yes      36167647232       40.2          0          0
+spsc_unaligned      1024     yes      18327732224       20.4          0          0
+mutex               1024     yes       9519964160       10.6          0          0
+rigtorp             1024     yes      35169984512       39.1          0          0
+boost               1024     yes      20691144704       23.0          0          0
+CLEAN: every message arrived once, in order, intact
+# finished 2026-10-01T21:19Z

@@ -212,7 +212,7 @@ pinned `c7i.2xlarge`, median of 3 runs each.
 |---|---|
 | Stress suite ([`test_queue_stress.cpp`](tests/test_queue_stress.cpp)): sequence must be exactly +1, random-delay interleavings, 4-slot wraparound, 48-byte payload integrity, full/empty, book hash vs golden at every checkpoint | ✅ all 5 queues, and clean under ThreadSanitizer, AddressSanitizer and UBSan, each its own CI build |
 | Book differential on real data, 04:00–12:00, pinned ([logs](results/matrix/c7i.2xlarge/logs)) | ✅ PASS for all 5 queues |
-| Long-run stress ([`queue_stress`](bench/queue_stress.cpp), every field of every message checked) | ✅ 0 errors: [Linux](results/stress/linux_c7i.2xlarge.txt), [M4, billions per queue](results/stress/long_run_m4.txt) |
+| Long-run stress ([`queue_stress`](bench/queue_stress.cpp), every field of every message checked) | ✅ **207 billion messages, 0 errors** on the M4 ([log](results/stress/long_run_m4.txt): 63 B this ring, 63 B Rigtorp, 40 B Boost, 30 B unpadded, 11 B mutex; 4-slot wraparound and 1024 slots with random delays), plus [Linux](results/stress/linux_c7i.2xlarge.txt) |
 | Deliberate bug: one `release` store made `relaxed` ([details](docs/DESIGN.md#13-the-deliberate-bug)) | ThreadSanitizer reports it (and CI checks it does, every push). **Apple M4: millions of corrupted messages. x86: 0**, and the machine code is byte-identical |
 
 **Headline: cross-core, 64K slots** (pinned Xeon Platinum 8488C):
