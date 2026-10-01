@@ -6,6 +6,7 @@
 //   feed_handler bench  FILE [--book fast|golden] [--runs 5] [--warmup 1] [--out DIR] [--label NAME] [--until T]
 //                            [--rate MSGS_PER_SEC | --speedup X [--pace-from HH:MM:SS]]
 //                            [--cpu-producer N] [--cpu-consumer N] [--ring-batch K] [--no-latency]
+//                            [--sample-every N]   time a random 1-in-N sample (N a power of two)
 //                            [--view SYMBOL [--view-interval-ms 1000] [--record FILE] [--no-draw]]
 //   feed_handler single FILE [--book fast|golden] [--cpu N] [--timed] [--until T]
 //   feed_handler gen    OUT  [--events N] [--seed S] [--stocks K]
@@ -214,6 +215,7 @@ PipelineOptions pipeline_options(const Args& a) {
     o.rate = a.num("rate", 0);
     o.ring_batch = static_cast<std::size_t>(a.num("ring-batch", 1));
     o.measure_latency = !a.has("no-latency");
+    o.sample_every = static_cast<uint32_t>(a.num("sample-every", 1));
     o.speedup = a.num("speedup", 0);
     if (a.has("pace-from")) o.pace_from_ns = parse_hhmmss(a.get("pace-from"));
     return o;

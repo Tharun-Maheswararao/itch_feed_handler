@@ -39,8 +39,11 @@ struct alignas(16) Msg {
     uint16_t locate;
     MsgType type;
     Side side;  // A/F only
-    uint32_t pad_;
+    uint32_t flags;  // pipeline-internal, see kMsgSampled
 };
+
+// Msg::flags bit: this message's latency is measured (set by the producer).
+inline constexpr uint32_t kMsgSampled = 1;
 
 static_assert(sizeof(Msg) == 48, "Msg must stay 48 bytes");
 static_assert(std::is_trivially_copyable_v<Msg>);

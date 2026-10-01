@@ -89,6 +89,12 @@ public:
         while (!try_pop(out)) cpu_relax();
     }
 
+    // Consumer only: messages published but not yet popped (one acquire load
+    // of the producer's index, so call it sparingly).
+    std::size_t consumer_depth() const noexcept {
+        return static_cast<std::size_t>(head_.value.load(std::memory_order_acquire) - cons_.value.tail);
+    }
+
     // Approximate (published indices only); safe to call from either side.
     std::size_t size_approx() const noexcept {
         return static_cast<std::size_t>(head_.value.load(std::memory_order_acquire) -

@@ -64,12 +64,15 @@ void print_message_mix(std::ostream& os, const ParseStats& st) {
 
 void print_run(std::ostream& os, const RunRecord& rec) {
     const RunResult& r = rec.result;
-    os << "Run " << rec.run << " [" << rec.label << "]" << (r.ring_batch > 1 ? "  ring batch " + std::to_string(r.ring_batch) : std::string()) << "  wall " << std::fixed << std::setprecision(3) << r.wall_seconds
+    os << "Run " << rec.run << " [" << rec.label << "]"
+       << (r.ring_batch > 1 ? "  ring batch " + std::to_string(r.ring_batch) : std::string())
+       << (r.sample_every > 1 ? "  latency sampled 1/" + std::to_string(r.sample_every) : std::string()) << "  wall "
+       << std::fixed << std::setprecision(3) << r.wall_seconds
        << " s   " << std::setprecision(2) << msgs_per_sec(r.parse.messages, r.wall_seconds) / 1e6
        << " M file msgs/s   " << msgs_per_sec(r.book_messages, r.wall_seconds) / 1e6 << " M book msgs/s\n";
-    os << "  book msgs " << r.book_messages << "   mean book update "
-       << std::setprecision(1) << (r.book_messages ? r.consumer_busy_seconds * 1e9 / static_cast<double>(r.book_messages) : 0)
-       << " ns (from summed busy time)\n";
+    os << "  book msgs " << r.book_messages << "   timed " << r.total.count() << "   mean book update "
+       << std::setprecision(1) << mean_book_update_ns(r) << " ns   ring depth at samples p50 "
+       << r.depth.percentile(0.5) << " p99 " << r.depth.percentile(0.99) << " max " << r.depth.max() << "\n";
     os << "  " << std::left << std::setw(8) << "latency" << std::right;
     for (auto p : kPcts) os << std::setw(11) << p.name;
     os << std::setw(11) << "max" << std::setw(11) << "mean" << "\n";
@@ -137,7 +140,7 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
 
     std::ofstream s(dir + "/run_stats.csv");
     if (!s) throw std::runtime_error("cannot write " + dir + "/run_stats.csv");
-    s << "run,label,median,paced,ring_batch,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
+    s << "run,label,median,paced,ring_batch,sample_every,samples,depth_p50,depth_p99,depth_max,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
     for (const char* m : {"total", "queue", "book"}) {
         for (auto p : kPcts) s << ',' << m << '_' << p.name << "_ns";
         s << ',' << m << "_max_ns," << m << "_mean_ns";
@@ -150,9 +153,9 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
         const auto& rec = runs[k];
         const RunResult& r = rec.result;
         s << rec.run << ',' << csv_escape(rec.label) << ',' << (k == med) << ',' << r.paced << ','
-          << r.ring_batch << ',' << r.wall_seconds << ',' << r.parse.messages << ',' << r.book_messages << ',' << msgs_per_sec(r.parse.messages, r.wall_seconds)
-          << ',' << msgs_per_sec(r.book_messages, r.wall_seconds) << ','
-          << (r.book_messages ? r.consumer_busy_seconds * 1e9 / static_cast<double>(r.book_messages) : 0);
+          << r.ring_batch << ',' << r.sample_every << ',' << r.total.count() << ',' << r.depth.percentile(0.5) << ','
+          << r.depth.percentile(0.99) << ',' << r.depth.max() << ',' << r.wall_seconds << ',' << r.parse.messages << ',' << r.book_messages << ',' << msgs_per_sec(r.parse.messages, r.wall_seconds)
+          << ',' << msgs_per_sec(r.book_messages, r.wall_seconds) << ',' << mean_book_update_ns(r);
         for (const LatencyHistogram* hist : {&r.total, &r.queue, &r.book}) {
             for (auto p : kPcts) s << ',' << ticks_to_ns(static_cast<double>(hist->percentile(p.q)));
             s << ',' << ticks_to_ns(static_cast<double>(hist->max())) << ',' << ticks_to_ns(hist->mean());

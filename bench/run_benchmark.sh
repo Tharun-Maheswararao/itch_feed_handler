@@ -7,6 +7,9 @@
 #   PRODUCER_CPU / CONSUMER_CPU  cores to pin to (Linux; default: two physical
 #                                cores on socket 0, skipping core 0)
 #   RATE                         paced replay rate, book msgs/s (default 2000000)
+#   SAMPLE_EVERY                 time a random 1-in-N sample of messages (default
+#                                16). One extra paced run times every message,
+#                                to show what full instrumentation costs.
 #   UNTIL                        cut paced runs at this ITCH time (default: full
 #                                day on Linux; 10:00:00 on macOS so the slice
 #                                fits in RAM and SSD paging stays out of the tail)
@@ -24,6 +27,7 @@ RESULTS=${RESULTS:-$ROOT/results}
 DOCS=${DOCS:-$ROOT/docs}
 RATE=${RATE:-2000000}
 MICRO_REPEAT=${MICRO_REPEAT:-3}
+SAMPLE_EVERY=${SAMPLE_EVERY:-16}
 if [[ "$(uname)" == "Darwin" ]]; then UNTIL=${UNTIL-10:00:00}; else UNTIL=${UNTIL-}; fi
 CUT=()
 if [[ -n "$UNTIL" ]]; then CUT=(--until "$UNTIL"); fi
@@ -89,17 +93,19 @@ run() {  # label, extra args...
     --label "$label" --out "$RESULTS/$label" ${PIN[@]+"${PIN[@]}"} "$@" | tee "$RESULTS/logs/$label.txt"
 }
 
-run unpaced
-run "$PACED" --rate "$RATE" ${CUT[@]+"${CUT[@]}"}
-run "${PACED}_view" --rate "$RATE" ${CUT[@]+"${CUT[@]}"} --view "$VIEW_SYMBOL" --no-draw \
+SAMPLE=(--sample-every "$SAMPLE_EVERY")
+run unpaced "${SAMPLE[@]}"
+run "$PACED" --rate "$RATE" ${CUT[@]+"${CUT[@]}"} "${SAMPLE[@]}"
+run "${PACED}_view" --rate "$RATE" ${CUT[@]+"${CUT[@]}"} "${SAMPLE[@]}" --view "$VIEW_SYMBOL" --no-draw \
   --record "$RESULTS/logs/view_frames.txt"
+run "${PACED}_every" --rate "$RATE" ${CUT[@]+"${CUT[@]}"} --sample-every 1
 
 echo "== component micro-benchmarks"
 "$BUILD/micro_bench" "$DATA" --repeat "$MICRO_REPEAT" | tee "$RESULTS/logs/micro_bench.txt"
 
 echo "== charts"
 "$PY" "$ROOT/scripts/plot_results.py" --results "$RESULTS" --out "$DOCS" \
-  --configs "unpaced,$PACED,${PACED}_view"
+  --configs "unpaced,$PACED,${PACED}_view,${PACED}_every"
 echo "== live view GIF (AAPL from the open, 5x real time)"
 "$BUILD/feed_handler" bench "$DATA" --runs 1 --warmup 0 --view "$VIEW_SYMBOL" --speedup 5 \
   --pace-from 09:30:00 --until 09:31:15 --view-interval-ms 250 --no-draw \

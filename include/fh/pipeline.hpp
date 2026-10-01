@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,6 +36,10 @@ struct PipelineOptions {
     // Per-message clock reads + histograms. Off = pure throughput run (no
     // latency results), to measure what the instrumentation itself costs.
     bool measure_latency = true;
+    // Measure latency on a random 1-in-N sample of messages (N a power of
+    // two; 1 = every message). Unsampled messages carry no clock reads on
+    // either thread, so the pipeline runs close to its uninstrumented speed.
+    uint32_t sample_every = 1;
     // Pacing (both off = replay as fast as the parser can go).
     double rate = 0;              // book messages per second, constant spacing
     double speedup = 0;           // follow ITCH timestamps at speedup x real time
@@ -50,9 +55,10 @@ struct PipelineOptions {
 
 struct RunResult {
     ParseStats parse;
-    LatencyHistogram total, queue, book;  // in clock ticks
+    LatencyHistogram total, queue, book;  // in clock ticks, sampled messages only
+    LatencyHistogram depth;               // ring depth (messages) seen at each sample
     double wall_seconds = 0;
-    double consumer_busy_seconds = 0;     // sum of book-update time
+    double consumer_busy_seconds = 0;     // sum of book-update time over samples
     uint64_t book_messages = 0;
     BookCounters counters;
     uint64_t final_hash = 0;
@@ -61,7 +67,21 @@ struct RunResult {
     bool producer_pinned = false, consumer_pinned = false;
     bool paced = false;
     std::size_t ring_batch = 1;
+    uint32_t sample_every = 1;
 };
+
+// Mean book update over the sampled messages, in ns (0 if nothing was timed).
+inline double mean_book_update_ns(const RunResult& r) {
+    return r.book.count() ? r.consumer_busy_seconds * 1e9 / static_cast<double>(r.book.count()) : 0.0;
+}
+
+// xorshift64: a few cycles, good enough to pick an unbiased random sample.
+inline uint64_t xorshift64(uint64_t& x) noexcept {
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return x;
+}
 
 // One step of the per-message digest chain.
 inline uint64_t chain_digest(uint64_t digest, uint64_t book_hash) noexcept { return mix64(digest ^ book_hash); }
@@ -116,6 +136,9 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
     RunResult r;
     r.paced = opt.rate > 0 || opt.speedup > 0;
     r.ring_batch = queue->batch();
+    if (opt.sample_every == 0 || (opt.sample_every & (opt.sample_every - 1)) != 0)
+        throw std::invalid_argument("sample_every must be a power of two");
+    r.sample_every = opt.sample_every;
     std::atomic<int> ready{0};
     std::atomic<bool> go{false};
 
@@ -136,7 +159,7 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
             queue->pop(m);
             if (m.type == MsgType::EndOfStream) [[unlikely]]
                 break;
-            if (opt.measure_latency) [[likely]] {
+            if (m.flags & kMsgSampled) {
                 const uint64_t t1 = now_ticks();
                 apply(book, m);
                 const uint64_t t2 = now_ticks();
@@ -144,6 +167,7 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                 r.queue.record(q);
                 r.book.record(t2 - t1);
                 r.total.record(q + (t2 - t1));
+                r.depth.record(queue->consumer_depth());
                 busy += t2 - t1;
             } else {
                 apply(book, m);
@@ -177,8 +201,13 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
         double next = static_cast<double>(now_ticks());
         uint64_t base_tick = 0, base_ts = 0;
         bool based = false;
+        const uint64_t sample_mask = opt.sample_every - 1;
+        uint64_t rng = 0x9E3779B97F4A7C15ull;
 
         r.parse = parse_buffer(begin, end, [&](Msg& m) {
+            // High bits of xorshift64 are the well-mixed ones.
+            const bool sampled = opt.measure_latency && (sample_mask == 0 || ((xorshift64(rng) >> 40) & sample_mask) == 0);
+            m.flags = sampled ? kMsgSampled : 0;
             if (by_rate) {
                 // Stamp with the scheduled arrival time, not the time we got
                 // round to it: if the producer falls behind (ring full), that
@@ -198,7 +227,7 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                     base_tick + static_cast<uint64_t>(static_cast<double>(m.timestamp - base_ts) * ticks_per_itch_ns);
                 while (now_ticks() < target) cpu_relax();
                 m.stamp = target;
-            } else if (opt.measure_latency) {
+            } else if (sampled) {
                 m.stamp = now_ticks();
             }
             queue->push(m);

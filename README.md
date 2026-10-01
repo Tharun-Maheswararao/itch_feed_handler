@@ -225,6 +225,7 @@ curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20
 | `feed_handler bench FILE --runs 5 --warmup 1 [--rate N] [--cpu-producer A --cpu-consumer B]` | timed runs, median, CSVs |
 | `feed_handler bench FILE --runs 1 --warmup 0 --view AAPL --speedup 5 --pace-from 09:30:00 --out results/logs/demo_view` | the live terminal view |
 | `feed_handler single FILE [--timed] [--cpu N]` | single-threaded parse + book; `--timed` adds the pipeline's per-message clock reads |
+| `feed_handler bench … --sample-every 16` | time a random 1-in-16 sample of messages (the benchmark default); `1` times every message |
 | `feed_handler bench … --ring-batch 32 --no-latency` | ring index batching; throughput-only run without per-message timing |
 | `bench/diagnose.sh FILE` | pipeline-overhead experiments (batching, SMT siblings, timing on/off, `perf stat`) |
 | `feed_handler gen OUT --events N` | synthetic ITCH feed (used by CI) |

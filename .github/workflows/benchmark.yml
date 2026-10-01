@@ -31,6 +31,9 @@ on:
       runs:
         description: Timed runs per configuration (after one warmup)
         default: "5"
+      sample_every:
+        description: Time a random 1-in-N sample of messages (power of two; 1 = every message)
+        default: "16"
 
 permissions:
   id-token: write   # OIDC: assume the AWS role without stored keys
@@ -134,6 +137,7 @@ jobs:
         env:
           RATE: ${{ inputs.rate }}
           RUNS: ${{ inputs.runs }}
+          SAMPLE_EVERY: ${{ inputs.sample_every }}
         run: bench/run_benchmark.sh data/12302019.NASDAQ_ITCH50
 
       - name: Golden-model check (full day, pinned)

@@ -183,6 +183,18 @@ Anomalies are counted, never ignored silently: unknown reference, overfill
   buckets in a fixed array. `record()` is a `clz`, a shift and an increment,
   with no allocation. Percentiles report the bucket's upper edge, so they
   never under-report.
+* **Sampled timing** (`--sample-every N`, the benchmark uses 16). Two clock
+  reads and three histogram updates per message cost about as much as the
+  book update itself, so timing every message measures a pipeline running at
+  half speed. The producer marks a random 1-in-N subset (xorshift64, so it
+  cannot line up with periodic patterns in the feed). Only marked messages
+  are stamped and timed, on both threads; the rest carry no instrumentation.
+  Each timed message also records the ring depth at that moment, so a
+  backlog between samples still shows up. 1 in 16 still gives about 16 M
+  samples per day, more than enough for p99.9. The trade-off is that the
+  single slowest message can fall between samples; anything that delays the
+  messages behind it cannot. `--sample-every 1` times every message, and the
+  benchmark runs one such configuration for comparison.
 * **Two replay modes, because they answer different questions.**
   * *Unpaced* replays as fast as possible. That measures throughput, but the
     parser outruns the book, so the ring is always full and every message

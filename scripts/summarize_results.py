@@ -56,8 +56,8 @@ def main():
         "",
         "**End-to-end latency** (parser stamp → book updated), median of the runs:",
         "",
-        "| Configuration | Book msgs | Throughput (median, range) | p50 | p90 | p99 | p99.9 | max | book p50 | book p99 |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Configuration | Book msgs | Timed | Throughput (median, range) | p50 | p90 | p99 | p99.9 | max | book p50 | book p99 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, d in stats.items():
         m = d[d["median"] == 1].iloc[0]
@@ -66,7 +66,9 @@ def main():
         na = "n/a"
         cells = [fmt_ns(m[f"total_{k}_ns"]) if timed else na for k in ("p50", "p90", "p99", "p999", "max")]
         book = [fmt_ns(m.book_p50_ns), fmt_ns(m.book_p99_ns)] if timed else [na, na]
-        out.append(f"| {name} | {int(m.book_messages):,} | {tput} | " + " | ".join(cells + book) + " |")
+        every = int(m["sample_every"]) if "sample_every" in d.columns else 1
+        timed_col = ("all" if every == 1 else f"1/{every}") if timed else "none"
+        out.append(f"| {name} | {int(m.book_messages):,} | {timed_col} | {tput} | " + " | ".join(cells + book) + " |")
     out.append("")
     out.append("Run-to-run spread of end-to-end p99: " + "; ".join(
         f"{n} {fmt_ns(d.total_p99_ns.min())}–{fmt_ns(d.total_p99_ns.max())}" for n, d in stats.items()

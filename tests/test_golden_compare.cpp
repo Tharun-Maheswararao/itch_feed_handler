@@ -3,6 +3,9 @@
 // message, checked with a running hash of book state.
 #include <gtest/gtest.h>
 
+#include <array>
+#include <stdexcept>
+
 #include "fh/book/compare.hpp"
 #include "fh/book/fast_book.hpp"
 #include "fh/book/golden_book.hpp"
@@ -79,6 +82,48 @@ TEST(GoldenCompare, PipelineWithBatchedRingMatchesGolden) {
         std::string err;
         EXPECT_TRUE(books_equal(*g, *b, &err)) << err;
     }
+}
+
+// Sampled latency: the book is untouched, about 1 in N messages is timed,
+// and every timed message also records a ring depth.
+TEST(GoldenCompare, SampledLatencyPipelineMatchesGolden) {
+    auto g = std::make_unique<GoldenBook<true>>();
+    const RunResult rg = run_single(feed().data(), feed().data() + feed().size(), *g, true);
+    for (uint32_t every : {1u, 16u}) {
+        for (double rate : {0.0, 4'000'000.0}) {
+            auto b = std::make_unique<FastBook<true>>(1 << 16);
+            PipelineOptions opt;
+            opt.verify = true;
+            opt.sample_every = every;
+            opt.rate = rate;
+            const RunResult rp = run_pipeline(feed().data(), feed().data() + feed().size(), *b, opt);
+            EXPECT_EQ(rp.digest, rg.digest) << "sample 1/" << every << " rate " << rate;
+            const double expect = static_cast<double>(rp.book_messages) / every;
+            EXPECT_NEAR(static_cast<double>(rp.total.count()), expect, expect * 0.05) << every;
+            EXPECT_EQ(rp.depth.count(), rp.total.count());
+            EXPECT_EQ(rp.book.count(), rp.total.count());
+            EXPECT_EQ(rp.sample_every, every);
+            if (every == 1) EXPECT_EQ(rp.total.count(), rp.book_messages);
+        }
+    }
+}
+
+TEST(GoldenCompare, SampleRateMustBePowerOfTwo) {
+    auto b = std::make_unique<FastBook<true>>(1 << 10);
+    PipelineOptions opt;
+    opt.sample_every = 12;
+    EXPECT_THROW(run_pipeline(feed().data(), feed().data() + 1000, *b, opt), std::invalid_argument);
+}
+
+// The sampler must not line up with message position: over every residue
+// class of the message index mod 16, the sampled fraction stays ~1/16.
+TEST(GoldenCompare, SamplerHasNoPeriodicBias) {
+    uint64_t rng = 0x9E3779B97F4A7C15ull;
+    constexpr int kN = 16'000'000;
+    std::array<int, 16> hits{};
+    for (int i = 0; i < kN; ++i)
+        if (((xorshift64(rng) >> 40) & 15) == 0) ++hits[i % 16];
+    for (int r = 0; r < 16; ++r) EXPECT_NEAR(hits[r], kN / 16 / 16, kN / 16 / 16 * 0.03) << "residue " << r;
 }
 
 TEST(GoldenCompare, PipelineWithGoldenBookMatchesGolden) {
