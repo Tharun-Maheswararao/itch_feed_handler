@@ -15,13 +15,15 @@ state.
 ## Results
 
 Pinned-core run on Linux, produced by the [Linux benchmark workflow](.github/workflows/benchmark.yml)
-([run](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/runs/36871008026),
+([run](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/runs/36891000656),
 [summary](results/linux/SUMMARY.md)).
 
 > **Host:** AWS `c7i.2xlarge`, Intel Xeon Platinum 8488C (4 physical / 8
 > logical cores), Ubuntu 24.04 (kernel 7.0), gcc 13.3.0, `-O3 -march=native`.
 > Parser and book thread **pinned to two separate physical cores**. Clock:
-> `rdtsc`, 0.42 ns per tick.
+> `rdtsc`, 0.42 ns per tick. Latency is measured on a **random 1-in-16 sample**
+> of messages (16.5 M samples per run, see below why); one configuration
+> times every message for comparison.
 
 **Correctness: the optimized two-thread pipeline equals the golden model.**
 
@@ -41,40 +43,55 @@ history is rebuilt on both.
 **End-to-end latency** (parser stamp → book updated), full day, median of 5
 runs after 1 warmup:
 
-| Configuration | Book msgs | Throughput | p50 | p90 | p99 | p99.9 | max |
+| Configuration | Timed | Throughput | p50 | p90 | p99 | p99.9 | max |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **unpaced** | 263.3 M | **3.18 M msgs/s** (3.07–3.23) | 5.24 ms | 5.46 ms | 6.01 ms | 7.21 ms | 7.55 ms |
-| **paced 2 M msgs/s** | 263.3 M | 2.00 M msgs/s | **506 ns** | **693 ns** | **4.48 µs** | 9.39 µs | 1.29 ms |
-| paced 2 M msgs/s, **live view on** | 263.3 M | 2.00 M msgs/s | 506 ns | 693 ns | 4.27 µs | 9.17 µs | 1.30 ms |
+| **unpaced** | 1/16 | **7.69 M msgs/s** (7.47–7.73) | 2.13 ms | 2.29 ms | 2.68 ms | 3.71 ms | 4.50 ms |
+| **paced 2 M msgs/s** | 1/16 | 2.00 M msgs/s | **466 ns** | **680 ns** | **3.09 µs** | 8.75 µs | 1.30 ms |
+| paced 2 M msgs/s, **live view on** | 1/16 | 2.00 M msgs/s | 480 ns | 706 ns | 3.25 µs | 8.75 µs | 1.28 ms |
+| paced 2 M msgs/s, every message timed | all | 2.00 M msgs/s | 466 ns | 693 ns | 4.59 µs | 8.75 µs | 1.28 ms |
 
-Across all ten paced runs: p50 506–520 ns, p90 680–720 ns, and **p99
-4.16–4.59 µs**. Inside the pipeline, across all 15 runs, the book update alone
-(t2 − t1) has p50 220–273 ns and p99 533–653 ns; queue wait at 2 M msgs/s has
-p50 266–280 ns.
+Across the five paced runs: p50 466 ns in every run, p90 680 ns, and **p99
+2.99–3.25 µs**. Book update alone (t2 − t1): p50 150–153 ns, p99 586–600 ns.
+At 2 M msgs/s the ring never held more than 5,307 messages at a sample.
 
 **Components** ([micro_bench log](results/linux/logs/micro_bench.txt)), single
 threaded unless noted:
 
 | Component | Cost |
 |---|---|
-| Parser | **10.4 ns/msg: 96 M msgs/s**, 2.95 GB/s (full file in page cache) |
-| Golden book (`unordered_map` + `std::map`) | 272 ns per book message |
-| Fast book (open addressing + sorted vectors) | **82.5 ns per book message, 3.3× faster** |
-| SPSC ring, 48-byte messages, 2 threads, unpinned | 79 ns/msg (12.7 M msgs/s) |
+| Parser | **10.3 ns/msg: 97 M msgs/s**, 3.0 GB/s (full file in page cache) |
+| Golden book (`unordered_map` + `std::map`) | 319 ns per book message |
+| Fast book (open addressing + sorted vectors) | **86 ns per book message, 3.7× faster** |
+| SPSC ring, 48-byte messages, 2 threads, unpinned | 45.6 ns/msg at batch 1, 25.7 at batch 8, 16.4 at batch 32 |
 
 **How to read this:**
 
 * **Pinning makes the tail repeatable.** On the unpinned Mac, paced p99 ranged
   from 0.5 µs to 193 ms between runs. Pinned on Linux, over the full day
-  rather than a slice, it stayed within 4.2–4.6 µs. Stamps use the
-  *scheduled* arrival time (coordinated-omission correction), so stalls are
-  charged to latency rather than hidden.
+  rather than a slice, it stayed within 3.0–3.3 µs, and the every-message p99
+  (4.59 µs) reproduced the first Linux run (4.48 µs) on a different physical
+  host. Stamps use the *scheduled* arrival time (coordinated-omission
+  correction), so stalls are charged to latency rather than hidden.
+* **Why sample.** Timing a message costs two `rdtsc` reads and three histogram
+  updates, about as much as the book update itself. Timing every message
+  measured a pipeline running at half speed: unpaced throughput was 3.18 M
+  msgs/s, and the book thread's extra busy time added queueing that pushed
+  paced p99 to 4.4–5.3 µs. With a random 1-in-16 sample, unpaced throughput
+  is 7.69 M msgs/s (what the untimed pipeline does) and p99 is 3.0–3.3 µs.
+  p50, p99.9 and max are unchanged, so sampling does not hide spikes: each
+  timed message also records the ring depth, and a stall delays every message
+  behind it.
+* **The split between queue wait and book update is approximate.** `rdtsc`
+  does not wait for earlier instructions to finish, so where "queue" ends and
+  "book" begins is only good to tens of nanoseconds. Sampled and
+  every-message runs have the same end-to-end p50 (466 ns) but split it
+  320 + 153 and 246 + 233 ns. Use the end-to-end figures.
 * **Unpaced is a throughput test.** The parser is about 8× faster than the
   book, so the ring stays full and each message waits behind the ~16k ahead
-  of it. The 5.2 ms "latency" is that backlog (16384 × ~314 ns), not a
+  of it. The 2.1 ms "latency" is that backlog (16384 × 130 ns), not a
   property of the code.
-* **The live view does not affect the pipeline:** p50 and p90 are identical
-  with it on and off, and p99 differs by 0.2 µs, inside the run-to-run spread.
+* **The live view does not affect the pipeline.** With it on, p99 is
+  3.04–3.41 µs against 2.99–3.25 µs off: the ranges overlap.
 * **Why the pipeline costs more per message than its parts: diagnosed.**
   Single threaded, the fast book costs 82.5 ns per message, but inside the
   pipeline a book update took 220–280 ns. A dedicated run
@@ -86,7 +103,7 @@ threaded unless noted:
   | Single thread, untimed | 123 ns/msg | 8.16 M/s |
   | Single thread, timed with the pipeline's own clock reads | 220 ns/msg | 4.55 M/s |
   | Pipeline, untimed | 135 ns/msg | 7.41 M/s |
-  | Pipeline, timed (the configuration measured above) | 255 ns/msg | 3.92 M/s |
+  | Pipeline, every message timed | 255 ns/msg | 3.92 M/s |
   | Pipeline, timed, ring batch 8 | 232 ns/msg | 4.31 M/s |
   | Pipeline, timed, both threads on one core's hyperthreads | 241 ns/msg | 4.15 M/s |
 
@@ -106,9 +123,8 @@ threaded unless noted:
 
   At 2 M msgs/s batching did not help: p50 was 506 ns either way, and p99 was
   5.9–6.1 µs at batch 1 against 6.3–7.3 µs at batch 32. The default therefore
-  stays at batch 1; `--ring-batch 8` is the throughput setting. The biggest
-  remaining lever is cheaper measurement (for example, timing a sample of
-  messages), not the ring.
+  stays at batch 1; `--ring-batch 8` is the throughput setting. The fix for
+  the measurement cost is the sampling now used above.
 
 ### Charts
 

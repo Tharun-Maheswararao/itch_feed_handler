@@ -248,17 +248,15 @@ with no screen recorder involved.
 
 ## 10. What I would change next
 
-1. **Cheaper latency measurement.** A diagnosis run on the pinned Xeon
-   ([report](../results/linux/diagnose/DIAGNOSE.md)) showed that the
-   per-message instrumentation (two `rdtsc` reads, three histogram updates)
-   costs about as much as the book update itself: throughput falls from
-   7.41 to 3.92 M msgs/s with timing on, while the untimed pipeline is
-   within 10% of a single thread. Timing a sample of messages (1 in 16 still
-   gives 16 M samples a day), or deriving queue wait from one read per
-   message, would recover most of that. Ring index batching (implemented,
-   `--ring-batch K`) cut the ring's extra L1 misses by 76% and helps
-   throughput by 6–10%, but did not improve paced latency, so it stays off
-   by default.
+1. **Cheaper timestamps for the split.** Sampling (§6) fixed the cost of
+   measurement: on the pinned Xeon, unpaced throughput rose from 3.18 to
+   7.69 M msgs/s and paced p99 fell from 4.4–5.3 to 3.0–3.3 µs, with p50,
+   p99.9 and max unchanged. What remains is precision: `rdtsc` is not
+   ordered, so the queue/book split is only good to tens of ns.
+   `rdtscp` + `lfence` on the sampled messages only would sharpen it at a
+   cost paid 1 time in 16. Ring index batching (`--ring-batch K`) stays off
+   by default: +6–10% unpaced throughput, no paced-latency gain
+   ([diagnosis](../results/linux/diagnose/DIAGNOSE.md)).
 2. **32-byte messages** by bit-packing side, type and locate. That puts two
    messages per 64-byte line and halves ring bandwidth.
 3. **Store a level handle in the order.** A price-indexed array around the

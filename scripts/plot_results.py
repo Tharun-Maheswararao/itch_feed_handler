@@ -185,8 +185,8 @@ def chart_percentiles(stats, out, configs, host):
     ax.set_ylim(top=ax.get_ylim()[1] * 8)  # room for rotated labels
     ax.yaxis.set_major_formatter(FuncFormatter(fmt_ns))
     ax.set_ylabel("end-to-end latency (log scale)")
-    ax.set_title("Parser stamp → book updated: percentiles, median run")
-    ax.legend(loc="upper left")
+    ax.set_title("Parser stamp → book updated: percentiles, median run", pad=28)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=len(configs), frameon=False)
     caption(fig, host)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig(out / "latency_percentiles.png")
