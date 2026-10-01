@@ -1,0 +1,7 @@
+268744780 messages, 263250843 book messages, best of 3
+parse only                     12.325 s     46.8 ns/book msg     21.8 M msgs/s
+parse + golden book            86.157 s    327.3 ns/book msg  (book only ~280.5 ns)
+parse + fast book              29.634 s    112.6 ns/book msg  (book only ~65.7 ns)
+fast book speedup over golden (book part): 4.27x
+spsc transfer (2 threads)       3.655 s    18.27 ns/msg     54.7 M msgs/s
+(checksum 1d3c200093233a6)

@@ -1,0 +1,10 @@
+build*/
+data/*
+!data/README.md
+results/logs/view_frames.txt
+*.itch
+.DS_Store
+__pycache__/
+compile_commands.json
+results/logs/demo_view/
+.cache/

@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.cxx }}, ${{ matrix.build }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, cxx: g++-14, build: Release }
+          - { os: ubuntu-24.04, cxx: clang++-18, build: Release }
+          - { os: ubuntu-24.04, cxx: g++-14, build: Debug }
+          - { os: macos-14, cxx: clang++, build: Release }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DFH_NATIVE=OFF
+      - name: Build
+        run: cmake --build build -j4
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure -j4
+
+  sanitizers:
+    name: sanitizer (${{ matrix.sanitize }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [ "address,undefined", "thread" ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++-18
+          -DFH_NATIVE=OFF -DFH_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build -j4
+      - name: Unit tests
+        env:
+          FH_SPSC_ITEMS: "2000000"
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build --output-on-failure -j2
+
+  end-to-end:
+    name: end-to-end on a synthetic feed
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_BUILD_TESTS=OFF
+          cmake --build build -j4
+      - name: Generate feed
+        run: ./build/feed_handler gen synthetic.itch --events 3000000 --seed 7 --stocks 64
+      - name: Count, golden, verify
+        run: |
+          ./build/feed_handler count synthetic.itch --repeat 2
+          ./build/feed_handler golden synthetic.itch --check-every 500000 --symbols SYM1,SYM2
+          ./build/feed_handler verify synthetic.itch --book fast --cpu-producer 0 --cpu-consumer 1
+          ./build/feed_handler verify synthetic.itch --book golden
+      - name: Bench and charts
+        run: |
+          pip install pandas matplotlib
+          ./build/feed_handler bench synthetic.itch --runs 3 --warmup 1 --label unpaced --out ci-results/unpaced
+          ./build/feed_handler bench synthetic.itch --runs 3 --warmup 0 --rate 2000000 --label paced_2M --out ci-results/paced_2M
+          python3 scripts/plot_results.py --results ci-results --out ci-charts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-charts
+          path: |
+            ci-results
+            ci-charts

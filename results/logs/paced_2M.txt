@@ -1,0 +1,66 @@
+CPU      Apple M4 (10 physical / 10 logical cores)
+OS       Darwin 24.6.0 arm64
+Compiler clang 17.0.0 (clang-1700.0.13.5)
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Wno-gnu-anonymous-struct -mcpu=native [Release]
+Clock    cntvct_el0 @ 1000.000 MHz (1.00 ns per tick, measured resolution 42.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
+stream cut at 10:00:00: 1.24 of 8.25 GB
+warmup 1 done: 19.02 s
+Run 1 [paced_2M]  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   mean book update 158.7 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        199 ns   11.01 ms  192.94 ms  200.71 ms  200.71 ms    9.91 ms
+  queue         77 ns   11.01 ms  192.94 ms  200.71 ms  200.71 ms    9.91 ms
+  book         125 ns     251 ns     591 ns    2.02 us   41.78 ms     159 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+  note: threads not pinned (macOS has no affinity API; QoS USER_INTERACTIVE requested)
+Run 2 [paced_2M]  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   mean book update 121.8 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        191 ns     311 ns  139.26 us    9.18 ms   20.31 ms   30.70 us
+  queue         73 ns     117 ns  139.26 us    9.18 ms   20.31 ms   30.58 us
+  book         125 ns     211 ns     423 ns     751 ns   17.59 ms     122 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [paced_2M]  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   mean book update 127.3 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        191 ns     327 ns    2.29 ms   32.51 ms   33.45 ms  153.34 us
+  queue         73 ns     117 ns    2.29 ms   32.51 ms   33.45 ms  153.21 us
+  book         125 ns     211 ns     463 ns     927 ns    9.58 ms     127 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 4 [paced_2M]  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   mean book update 162.3 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        203 ns   36.86 us   88.08 ms  113.25 ms  116.23 ms    2.44 ms
+  queue         81 ns   36.86 us   88.08 ms  113.25 ms  116.23 ms    2.44 ms
+  book         125 ns     251 ns     639 ns    2.05 us   11.49 ms     162 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 5 [paced_2M]  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   mean book update 123.0 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        191 ns     311 ns  204.80 us    8.00 ms   14.82 ms   33.37 us
+  queue         75 ns     119 ns  200.70 us    8.00 ms   14.82 ms   33.24 us
+  book         125 ns     211 ns     423 ns     927 ns   10.08 ms     123 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 3
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/paced_2M/histogram.csv and /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/paced_2M/run_stats.csv

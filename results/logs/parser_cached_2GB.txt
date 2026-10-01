@@ -1,0 +1,5 @@
+# feed_handler count on the first 2,000,000,000 bytes of the day file (fits in page cache)
+pass 1: 64539695 messages in 0.364 s = 177.4 M msgs/s, 5.50 GB/s (checksum 805e1c04ba819)
+pass 2: 64539695 messages in 0.314 s = 205.8 M msgs/s, 6.38 GB/s (checksum 805e1c04ba819)
+pass 3: 64539695 messages in 0.382 s = 169.2 M msgs/s, 5.24 GB/s (checksum 805e1c04ba819)
+counts identical across 3 passes: yes

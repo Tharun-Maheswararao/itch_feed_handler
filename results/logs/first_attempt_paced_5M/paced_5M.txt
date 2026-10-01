@@ -1,0 +1,65 @@
+CPU      Apple M4 (10 physical / 10 logical cores)
+OS       Darwin 24.6.0 arm64
+Compiler clang 17.0.0 (clang-1700.0.13.5)
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Wno-gnu-anonymous-struct -O3 -mcpu=native [Release]
+Clock    cntvct_el0 @ 1000.000 MHz (1.00 ns per tick)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
+warmup 1 done: 52.65 s
+Run 1 [paced_5M]  wall 52.650 s   5.10 M file msgs/s   5.00 M book msgs/s
+  book msgs 263250843   mean book update 118.3 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total      69.63 us  241.66 us   16.78 ms   36.70 ms   40.41 ms  608.76 us
+  queue      69.63 us  241.66 us   16.78 ms   36.70 ms   40.41 ms  608.64 us
+  book         125 ns     211 ns     375 ns     719 ns    3.34 ms     118 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+  note: threads not pinned (macOS has no affinity API; QoS USER_INTERACTIVE requested)
+Run 2 [paced_5M]  wall 52.650 s   5.10 M file msgs/s   5.00 M book msgs/s
+  book msgs 263250843   mean book update 123.7 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total      98.30 us   50.33 ms  394.26 ms  419.43 ms  421.82 ms   22.62 ms
+  queue      98.30 us   50.33 ms  394.26 ms  419.43 ms  421.82 ms   22.62 ms
+  book         125 ns     211 ns     423 ns     847 ns   14.87 ms     124 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 3 [paced_5M]  wall 52.650 s   5.10 M file msgs/s   5.00 M book msgs/s
+  book msgs 263250843   mean book update 129.7 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total     126.97 us  163.58 ms  377.49 ms  447.41 ms  447.41 ms   37.24 ms
+  queue     126.97 us  163.58 ms  377.49 ms  447.41 ms  447.41 ms   37.24 ms
+  book         125 ns     211 ns     463 ns     927 ns   48.84 ms     130 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 4 [paced_5M]  wall 52.650 s   5.10 M file msgs/s   5.00 M book msgs/s
+  book msgs 263250843   mean book update 127.5 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total     110.59 us   81.79 ms  222.30 ms  234.88 ms  240.76 ms   18.55 ms
+  queue     110.59 us   81.79 ms  222.30 ms  234.88 ms  240.76 ms   18.55 ms
+  book         125 ns     211 ns     463 ns     879 ns   19.00 ms     128 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 5 [paced_5M]  wall 52.650 s   5.10 M file msgs/s   5.00 M book msgs/s
+  book msgs 263250843   mean book update 126.7 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total      96.25 us  188.74 ms     1.14 s     1.16 s     1.16 s   75.81 ms
+  queue      96.25 us  188.74 ms     1.14 s     1.16 s     1.16 s   75.81 ms
+  book         125 ns     211 ns     423 ns     847 ns   41.64 ms     127 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+
+median run by throughput: run 2
+Message mix (268744780 messages, 8.25 GB)
+  A     117145568   43.59%
+  D     114360997   42.55%
+  U      21639067    8.05%
+  E       5722824    2.13%
+  I       4024315    1.50%
+  X       2787676    1.04%
+  F       1485888    0.55%
+  P       1218602    0.45%
+  L        215161    0.08%
+  C         99917    0.04%
+  Q         17836    0.01%
+  Y          9013    0.00%
+  H          8966    0.00%
+  R          8906    0.00%
+  J            34    0.00%
+  S             6    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/paced_5M/histogram.csv and /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/paced_5M/run_stats.csv
