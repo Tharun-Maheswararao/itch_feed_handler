@@ -1,0 +1,39 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (96 physical / 192 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.002 MHz (0.42 ns per tick, measured resolution 6.67 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    rigtorp (rigtorp/SPSCQueue@1053918), capacity 65536 slots
+Run 1 [c2c_rigtorp]  queue rigtorp  latency sampled 1/16  wall 4.992 s   7.92 M file msgs/s   7.62 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 118.1 ns   ring depth at samples p50 65535 p99 65536 max 65536
+  latency         p50        p90        p99       p999        max       mean
+  total       8.96 ms    9.39 ms   11.14 ms   15.64 ms   15.64 ms    8.59 ms
+  queue       8.96 ms    9.39 ms   11.14 ms   15.64 ms   15.64 ms    8.59 ms
+  book         105 ns     220 ns     406 ns     800 ns  126.74 us     118 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 1
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.metal-48xl/c2c/run_rigtorp/histogram.csv and results/matrix/c7i.metal-48xl/c2c/run_rigtorp/run_stats.csv
+[ perf record: Woken up 25 times to write data ]
+[ perf record: Captured and wrote 6.204 MB results/matrix/c7i.metal-48xl/c2c/c2c_rigtorp.data (67600 samples) ]

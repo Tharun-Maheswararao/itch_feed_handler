@@ -1,0 +1,17 @@
+# started on Thu Oct  1 22:15:22 2026
+
+
+ Performance counter stats for '/actions-runner/_work/itch_feed_handler/itch_feed_handler/build-bench/feed_handler bench data/12302019.NASDAQ_ITCH50 --book fast --queue spsc --capacity 65536 --until 10:00:00 --runs 1 --warmup 0 --cpu-producer 1 --cpu-consumer 2 --sample-every 16 --label c2c_spsc --out results/matrix/c7i.metal-48xl/c2c/run_spsc':
+
+       32127937522      cycles                                                                
+       16749315886      instructions                                                          
+         192699942      L1-dcache-load-misses                                                 
+          17574731      LLC-load-misses                                                       
+           6068877      LLC-store-misses                                                      
+
+       4.603943951 seconds time elapsed
+
+       8.380476000 seconds user
+       0.074995000 seconds sys
+
+

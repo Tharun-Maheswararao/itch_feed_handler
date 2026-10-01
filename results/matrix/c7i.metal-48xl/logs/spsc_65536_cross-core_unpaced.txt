@@ -1,0 +1,52 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (96 physical / 192 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.001 MHz (0.42 ns per tick, measured resolution 6.67 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    spsc (this repo), capacity 65536 slots, placement cross-core
+warmup 1 done: 4.05 s
+Run 1 [spsc_65536_cross-core_unpaced]  latency sampled 1/16  wall 4.061 s   9.73 M file msgs/s   9.37 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 109.6 ns   ring depth at samples p50 65535 p99 65536 max 65536
+  latency         p50        p90        p99       p999        max       mean
+  total       7.43 ms    7.65 ms    8.96 ms   13.29 ms   13.29 ms    6.98 ms
+  queue       7.43 ms    7.65 ms    8.96 ms   13.29 ms   13.29 ms    6.98 ms
+  book          93 ns     203 ns     393 ns     600 ns   45.04 us     110 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 2 [spsc_65536_cross-core_unpaced]  latency sampled 1/16  wall 4.067 s   9.72 M file msgs/s   9.35 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 109.6 ns   ring depth at samples p50 65535 p99 65536 max 65536
+  latency         p50        p90        p99       p999        max       mean
+  total       7.43 ms    7.65 ms    8.96 ms   13.33 ms   13.33 ms    7.00 ms
+  queue       7.43 ms    7.65 ms    8.96 ms   13.33 ms   13.33 ms    7.00 ms
+  book          93 ns     203 ns     393 ns     586 ns  230.39 us     110 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [spsc_65536_cross-core_unpaced]  latency sampled 1/16  wall 4.049 s   9.76 M file msgs/s   9.39 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 109.5 ns   ring depth at samples p50 65535 p99 65536 max 65536
+  latency         p50        p90        p99       p999        max       mean
+  total       7.21 ms    7.65 ms    8.74 ms   13.33 ms   13.34 ms    6.97 ms
+  queue       7.21 ms    7.65 ms    8.74 ms   13.33 ms   13.34 ms    6.97 ms
+  book          93 ns     203 ns     393 ns     586 ns   44.39 us     109 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by throughput: run 1
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/matrix/c7i.metal-48xl/spsc_65536_cross-core_unpaced/histogram.csv and results/matrix/c7i.metal-48xl/spsc_65536_cross-core_unpaced/run_stats.csv
