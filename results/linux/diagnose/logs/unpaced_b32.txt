@@ -1,0 +1,51 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.001 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
+stream cut at 12:00:00: 4.12 of 8.25 GB
+warmup 1 done: 31.58 s
+Run 1 [unpaced_b32]  ring batch 32  wall 31.667 s   4.25 M file msgs/s   4.19 M book msgs/s
+  book msgs 132659542   mean book update 194.0 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total       3.93 ms    4.26 ms    4.59 ms    5.46 ms    6.54 ms    3.91 ms
+  queue       3.93 ms    4.26 ms    4.59 ms    5.46 ms    6.54 ms    3.91 ms
+  book         170 ns     360 ns     626 ns     906 ns  148.51 us     194 ns
+  book: adds 60137613  exec 2390147  cancel 1950874  delete 56599584  replace 11572418  live 1771377  peak 1771639  unknown_ref 0  overfill 0
+Run 2 [unpaced_b32]  ring batch 32  wall 31.374 s   4.29 M file msgs/s   4.23 M book msgs/s
+  book msgs 132659542   mean book update 192.0 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total       3.93 ms    4.26 ms    4.59 ms    5.35 ms    6.62 ms    3.87 ms
+  queue       3.93 ms    4.26 ms    4.59 ms    5.35 ms    6.62 ms    3.87 ms
+  book         170 ns     360 ns     626 ns     906 ns  145.20 us     192 ns
+  book: adds 60137613  exec 2390147  cancel 1950874  delete 56599584  replace 11572418  live 1771377  peak 1771639  unknown_ref 0  overfill 0
+Run 3 [unpaced_b32]  ring batch 32  wall 31.346 s   4.29 M file msgs/s   4.23 M book msgs/s
+  book msgs 132659542   mean book update 192.1 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total       3.93 ms    4.26 ms    4.59 ms    5.68 ms    7.28 ms    3.87 ms
+  queue       3.93 ms    4.26 ms    4.59 ms    5.68 ms    7.28 ms    3.87 ms
+  book         170 ns     360 ns     626 ns     906 ns  154.46 us     192 ns
+  book: adds 60137613  exec 2390147  cancel 1950874  delete 56599584  replace 11572418  live 1771377  peak 1771639  unknown_ref 0  overfill 0
+
+median run by throughput: run 2
+Message mix (134508460 messages, 4.12 GB)
+  A      58958289   43.83%
+  D      56599584   42.08%
+  U      11572418    8.60%
+  E       2347060    1.74%
+  X       1950874    1.45%
+  F       1179324    0.88%
+  I       1082118    0.80%
+  P        524833    0.39%
+  L        215105    0.16%
+  C         43087    0.03%
+  Y          8962    0.01%
+  H          8943    0.01%
+  Q          8924    0.01%
+  R          8906    0.01%
+  J            26    0.00%
+  S             3    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/diagnose/unpaced_b32/histogram.csv and results/diagnose/unpaced_b32/run_stats.csv

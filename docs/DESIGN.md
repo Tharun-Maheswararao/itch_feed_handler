@@ -236,16 +236,17 @@ with no screen recorder involved.
 
 ## 10. What I would change next
 
-1. **Find out why the pipeline costs more than its parts, then batch the
-   ring.** On the pinned Xeon, a book update costs 82.5 ns single threaded
-   but 220–280 ns inside the pipeline, and raw SPSC transfer costs 79 ns per
-   message (18–34 ns on an M4). Run `perf stat` / `perf c2c` on the instance
-   to see whether the time goes to cache-line transfers between the two
-   cores, to memory latency on the order table, or is partly an artefact of
-   the single-threaded figure being a subtraction. If cross-core traffic
-   dominates, publish `head`/`tail` once per *k* messages and pop runs of
-   messages with a single acquire, trading a few ns of latency for far fewer
-   cache-line transfers.
+1. **Cheaper latency measurement.** A diagnosis run on the pinned Xeon
+   ([report](../results/linux/diagnose/DIAGNOSE.md)) showed that the
+   per-message instrumentation (two `rdtsc` reads, three histogram updates)
+   costs about as much as the book update itself: throughput falls from
+   7.41 to 3.92 M msgs/s with timing on, while the untimed pipeline is
+   within 10% of a single thread. Timing a sample of messages (1 in 16 still
+   gives 16 M samples a day), or deriving queue wait from one read per
+   message, would recover most of that. Ring index batching (implemented,
+   `--ring-batch K`) cut the ring's extra L1 misses by 76% and helps
+   throughput by 6–10%, but did not improve paced latency, so it stays off
+   by default.
 2. **32-byte messages** by bit-packing side, type and locate. That puts two
    messages per 64-byte line and halves ring bandwidth.
 3. **Store a level handle in the order.** A price-indexed array around the

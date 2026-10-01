@@ -75,20 +75,40 @@ threaded unless noted:
   property of the code.
 * **The live view does not affect the pipeline:** p50 and p90 are identical
   with it on and off, and p99 differs by 0.2 µs, inside the run-to-run spread.
-* **An open question: the pipeline costs more per message than the parts.**
+* **Why the pipeline costs more per message than its parts: diagnosed.**
   Single threaded, the fast book costs 82.5 ns per message, but inside the
-  pipeline a book update takes 220–280 ns, and unpaced throughput (314 ns per
-  message) is well below what the parts suggest. Three leading suspects, not
-  yet separated:
-  (1) **cross-core traffic** on the ring's indices and slots. Raw SPSC
-  transfer costs 79 ns/msg here against 18–34 ns on an M4, so moving cache
-  lines between cores is several times dearer on this Xeon;
-  (2) the single-threaded figure is a *subtraction* (parse+book − parse) that
-  benefits from the CPU overlapping parsing with the book's cache misses;
-  (3) cloud VM memory latency on the 192 MB order table.
-  The next step is batched index publication in the ring plus hardware
-  counters (`perf stat`) on the instance. See
-  [DESIGN.md §10](docs/DESIGN.md#10-what-i-would-change-next).
+  pipeline a book update took 220–280 ns. A dedicated run
+  ([report](results/linux/diagnose/DIAGNOSE.md), pinned, 04:00–12:00, 132.7 M
+  book messages) separated the causes:
+
+  | Experiment (same instance) | Consumer cost | Throughput |
+  |---|---:|---:|
+  | Single thread, untimed | 123 ns/msg | 8.16 M/s |
+  | Single thread, timed with the pipeline's own clock reads | 220 ns/msg | 4.55 M/s |
+  | Pipeline, untimed | 135 ns/msg | 7.41 M/s |
+  | Pipeline, timed (the configuration measured above) | 255 ns/msg | 3.92 M/s |
+  | Pipeline, timed, ring batch 8 | 232 ns/msg | 4.31 M/s |
+  | Pipeline, timed, both threads on one core's hyperthreads | 241 ns/msg | 4.15 M/s |
+
+  1. **Measuring every message is the main cost.** Two `rdtsc` reads and three
+     histogram updates per message nearly halve throughput, single threaded
+     (123 → 220 ns) and in the pipeline (7.41 → 3.92 M/s) alike, partly
+     because they stop the CPU overlapping one message's cache misses with
+     the next. Untimed, the pipeline is within 10% of the single thread.
+  2. **Cross-core traffic is real but small.** Publishing the ring indices
+     every 8 messages instead of every message adds 6–10% throughput and cuts
+     the extra L1 misses caused by the ring by 76% (`perf stat`), and raw ring
+     transfer drops from 92.5 to 17.1 ns per message at batch 32. Moving both
+     threads onto one physical core gains only 6%.
+  3. **Memory is not the difference.** dTLB misses are the same with and
+     without the pipeline (about 0.14 per message: the huge pages work), and
+     context switches stay under 200 per run (pinning holds).
+
+  At 2 M msgs/s batching did not help: p50 was 506 ns either way, and p99 was
+  5.9–6.1 µs at batch 1 against 6.3–7.3 µs at batch 32. The default therefore
+  stays at batch 1; `--ring-batch 8` is the throughput setting. The biggest
+  remaining lever is cheaper measurement (for example, timing a sample of
+  messages), not the ring.
 
 ### Charts
 

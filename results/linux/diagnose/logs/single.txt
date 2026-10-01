@@ -1,0 +1,5 @@
+stream cut at 12:00:00: 4.12 of 8.25 GB
+single [fast] 132659542 book msgs (134508460 total) in 16.260 s = 122.6 ns per book msg, pinned yes
+stream cut at 12:00:00: 4.12 of 8.25 GB
+single [fast, timed] 132659542 book msgs (134508460 total) in 29.144 s = 219.7 ns per book msg, pinned yes
+  book update (t2-t1): mean 168.6 ns  p50 153  p90 333  p99 600  p99.9 906 ns

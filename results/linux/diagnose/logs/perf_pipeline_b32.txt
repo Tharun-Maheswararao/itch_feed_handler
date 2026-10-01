@@ -1,0 +1,24 @@
+# started on Thu Oct  1 15:46:39 2026
+
+
+ Performance counter stats for '/actions-runner/_work/itch_feed_handler/itch_feed_handler/build-bench/feed_handler bench data/12302019.NASDAQ_ITCH50 --until 12:00:00 --runs 1 --warmup 0 --cpu-producer 1 --cpu-consumer 2 --ring-batch 32 --out results/diagnose/perf_tmp':
+
+          65035.68 msec task-clock                                                            
+               139      context-switches                                                      
+                 2      cpu-migrations                                                        
+             69656      page-faults                                                           
+      209156499748      cycles                                                                
+       94587001942      instructions                                                          
+         515559547      branch-misses                                                         
+                 0      cache-references                                                      
+                 0      cache-misses                                                          
+         564328080      L1-dcache-load-misses                                                 
+   <not supported>      LLC-load-misses                                                       
+          18999008      dTLB-load-misses                                                      
+
+      33.186970570 seconds time elapsed
+
+      64.893164000 seconds user
+       0.142968000 seconds sys
+
+
