@@ -1,0 +1,64 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.002 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
+warmup 1 done: 131.63 s
+Run 1 [paced_2M]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   mean book update 233.8 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        506 ns     680 ns    4.37 us    9.17 us    1.27 ms     605 ns
+  queue        280 ns     313 ns    4.05 us    8.96 us    1.27 ms     372 ns
+  book         226 ns     360 ns     573 ns     800 ns  179.97 us     234 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 2 [paced_2M]  wall 131.625 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   mean book update 240.4 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        506 ns     693 ns    4.48 us    9.39 us    1.29 ms     614 ns
+  queue        280 ns     313 ns    4.27 us    8.96 us    1.29 ms     374 ns
+  book         233 ns     380 ns     586 ns     840 ns  173.21 us     240 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 3 [paced_2M]  wall 131.625 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   mean book update 241.5 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        506 ns     693 ns    4.59 us    9.39 us    1.29 ms     622 ns
+  queue        280 ns     313 ns    4.27 us    8.96 us    1.29 ms     380 ns
+  book         233 ns     380 ns     600 ns     853 ns  144.93 us     241 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 4 [paced_2M]  wall 131.625 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   mean book update 233.9 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        506 ns     680 ns    4.37 us    9.17 us    1.27 ms     605 ns
+  queue        280 ns     313 ns    4.05 us    8.96 us    1.27 ms     371 ns
+  book         226 ns     360 ns     573 ns     800 ns  384.62 us     234 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 5 [paced_2M]  wall 131.625 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   mean book update 234.4 ns (from summed busy time)
+  latency         p50        p90        p99       p999        max       mean
+  total        506 ns     680 ns    4.48 us    9.39 us    1.27 ms     607 ns
+  queue        280 ns     313 ns    4.16 us    9.17 us    1.27 ms     372 ns
+  book         226 ns     366 ns     573 ns     800 ns  141.78 us     234 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 2
+Message mix (268744780 messages, 8.25 GB)
+  A     117145568   43.59%
+  D     114360997   42.55%
+  U      21639067    8.05%
+  E       5722824    2.13%
+  I       4024315    1.50%
+  X       2787676    1.04%
+  F       1485888    0.55%
+  P       1218602    0.45%
+  L        215161    0.08%
+  C         99917    0.04%
+  Q         17836    0.01%
+  Y          9013    0.00%
+  H          8966    0.00%
+  R          8906    0.00%
+  J            34    0.00%
+  S             6    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/linux/paced_2M/histogram.csv and results/linux/paced_2M/run_stats.csv
