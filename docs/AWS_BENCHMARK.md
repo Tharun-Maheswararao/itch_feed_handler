@@ -76,6 +76,7 @@ GitHub → **Actions** → **Linux benchmark** → **Run workflow** (on `main`):
 
 | Input | Default | Notes |
 |---|---|---|
+| `mode` | `benchmark` | `diagnose` runs [`bench/diagnose.sh`](../bench/diagnose.sh) instead: pipeline-overhead experiments, about 35 min, artifact `linux-diagnose-<run id>` plus the run summary, no PR |
 | `instance_type` | `c7i.2xlarge` | 4 physical cores, 16 GB. `c7i.metal-24xl` has no hypervisor or noisy neighbours, for the cleanest tails, at about $4/h |
 | `rate` | `2000000` | paced replay rate |
 | `runs` | `5` | timed runs per configuration, after one warmup |

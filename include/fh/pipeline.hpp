@@ -30,6 +30,11 @@ using MsgQueue = SpscQueue<Msg, kRingCapacity>;
 struct PipelineOptions {
     int producer_cpu = -1;
     int consumer_cpu = -1;
+    // Ring index publication batch (1 = after every message). See SpscQueue.
+    std::size_t ring_batch = 1;
+    // Per-message clock reads + histograms. Off = pure throughput run (no
+    // latency results), to measure what the instrumentation itself costs.
+    bool measure_latency = true;
     // Pacing (both off = replay as fast as the parser can go).
     double rate = 0;              // book messages per second, constant spacing
     double speedup = 0;           // follow ITCH timestamps at speedup x real time
@@ -55,6 +60,7 @@ struct RunResult {
     std::vector<uint64_t> checkpoints;
     bool producer_pinned = false, consumer_pinned = false;
     bool paced = false;
+    std::size_t ring_batch = 1;
 };
 
 // One step of the per-message digest chain.
@@ -106,8 +112,10 @@ RunResult run_single(const uint8_t* begin, const uint8_t* end, Book& book, bool 
 template <class Book>
 RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, const PipelineOptions& opt) {
     auto queue = std::make_unique<MsgQueue>();
+    queue->set_batch(opt.ring_batch);
     RunResult r;
     r.paced = opt.rate > 0 || opt.speedup > 0;
+    r.ring_batch = queue->batch();
     std::atomic<int> ready{0};
     std::atomic<bool> go{false};
 
@@ -126,17 +134,21 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
         Msg m;
         for (;;) {
             queue->pop(m);
-            const uint64_t t1 = now_ticks();
             if (m.type == MsgType::EndOfStream) [[unlikely]]
                 break;
-            apply(book, m);
-            const uint64_t t2 = now_ticks();
+            if (opt.measure_latency) [[likely]] {
+                const uint64_t t1 = now_ticks();
+                apply(book, m);
+                const uint64_t t2 = now_ticks();
+                const uint64_t q = t1 > m.stamp ? t1 - m.stamp : 0;
+                r.queue.record(q);
+                r.book.record(t2 - t1);
+                r.total.record(q + (t2 - t1));
+                busy += t2 - t1;
+            } else {
+                apply(book, m);
+            }
             ++n;
-            const uint64_t q = t1 > m.stamp ? t1 - m.stamp : 0;
-            r.queue.record(q);
-            r.book.record(t2 - t1);
-            r.total.record(q + (t2 - t1));
-            busy += t2 - t1;
             if (opt.verify) {
                 digest = chain_digest(digest, book.hash());
                 if (n % opt.checkpoint_every == 0) r.checkpoints.push_back(digest);
@@ -186,14 +198,16 @@ RunResult run_pipeline(const uint8_t* begin, const uint8_t* end, Book& book, con
                     base_tick + static_cast<uint64_t>(static_cast<double>(m.timestamp - base_ts) * ticks_per_itch_ns);
                 while (now_ticks() < target) cpu_relax();
                 m.stamp = target;
-            } else {
+            } else if (opt.measure_latency) {
                 m.stamp = now_ticks();
             }
             queue->push(m);
+            if (r.paced) queue->flush();  // about to idle until the next arrival
         });
         Msg end_msg{};
         end_msg.type = MsgType::EndOfStream;
         queue->push(end_msg);
+        queue->flush();
     });
 
     while (ready.load() < 2) cpu_relax();

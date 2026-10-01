@@ -1,6 +1,8 @@
 # Pinned Linux benchmark on a temporary EC2 instance.
 #
-# Run it from the Actions tab ("Linux benchmark" -> "Run workflow"). It:
+# Run it from the Actions tab ("Linux benchmark" -> "Run workflow").
+# mode=diagnose instead runs bench/diagnose.sh (pipeline-overhead experiments)
+# and only uploads an artifact. In benchmark mode it:
 #   1. launches an EC2 instance and registers it as a single-use runner,
 #   2. downloads the Nasdaq day, runs bench/run_benchmark.sh with pinned cores
 #      and the full-day golden-model check,
@@ -13,6 +15,11 @@ name: Linux benchmark
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "benchmark = official run + results PR; diagnose = pipeline-overhead experiments (artifact only)"
+        type: choice
+        default: benchmark
+        options: [benchmark, diagnose]
       instance_type:
         description: EC2 instance type (needs >= 16 GB RAM so the day fits in page cache)
         type: choice
@@ -87,7 +94,7 @@ jobs:
             ]
 
   benchmark:
-    name: Benchmark on ${{ inputs.instance_type }}
+    name: ${{ inputs.mode == 'diagnose' && 'Diagnose' || 'Benchmark' }} on ${{ inputs.instance_type }}
     needs: start-runner
     runs-on: ${{ needs.start-runner.outputs.label }}
     timeout-minutes: 150
@@ -101,6 +108,11 @@ jobs:
           $SUDO apt-get update -q
           $SUDO apt-get install -y -q build-essential cmake curl \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
+          if [ "${{ inputs.mode }}" = diagnose ]; then
+            # perf for hardware counters; best effort (package names vary by kernel)
+            $SUDO apt-get install -y -q linux-tools-common "linux-tools-$(uname -r)" \
+              || $SUDO apt-get install -y -q linux-tools-common linux-tools-aws || true
+          fi
 
       - name: Host
         run: |
@@ -118,19 +130,38 @@ jobs:
           ls -l data
 
       - name: Benchmark (pinned cores, full day)
+        if: ${{ inputs.mode == 'benchmark' }}
         env:
           RATE: ${{ inputs.rate }}
           RUNS: ${{ inputs.runs }}
         run: bench/run_benchmark.sh data/12302019.NASDAQ_ITCH50
 
       - name: Golden-model check (full day, pinned)
+        if: ${{ inputs.mode == 'benchmark' }}
         run: |
           cores=($(lscpu -p=CPU,CORE,SOCKET | grep -v '^#' | awk -F, '$3==0 && !seen[$2]++ {print $1}'))
           build-bench/feed_handler verify data/12302019.NASDAQ_ITCH50 --book fast \
             --cpu-producer "${cores[1]}" --cpu-consumer "${cores[2]}" | tee "$RESULTS/logs/verify_full_day.txt"
           grep -q '^PASS' "$RESULTS/logs/verify_full_day.txt"
 
+      - name: Diagnose pipeline overhead (pinned)
+        if: ${{ inputs.mode == 'diagnose' }}
+        env:
+          OUT: results/diagnose
+          RUNS: "3"
+        run: |
+          bench/diagnose.sh data/12302019.NASDAQ_ITCH50
+          cat results/diagnose/DIAGNOSE.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.mode == 'diagnose' }}
+        with:
+          name: linux-diagnose-${{ github.run_id }}
+          path: results/diagnose
+          retention-days: 30
+
       - name: Summary
+        if: ${{ inputs.mode == 'benchmark' }}
         run: |
           python3 scripts/summarize_results.py --results "$RESULTS" \
             --title "Linux benchmark: ${{ inputs.instance_type }}" \
@@ -140,6 +171,7 @@ jobs:
           cat "$RESULTS/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.mode == 'benchmark' }}
         with:
           name: linux-benchmark-${{ github.run_id }}
           path: |
@@ -150,6 +182,7 @@ jobs:
   open-pr:
     name: Open pull request with results
     needs: benchmark
+    if: ${{ inputs.mode == 'benchmark' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

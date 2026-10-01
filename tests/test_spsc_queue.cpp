@@ -17,8 +17,9 @@ uint64_t items_from_env(uint64_t def) {
 
 // Producer pushes 0..n-1, consumer checks each arrives once and in order.
 template <std::size_t Cap>
-void sequence_test(uint64_t n) {
+void sequence_test(uint64_t n, std::size_t batch = 1) {
     auto q = std::make_unique<SpscQueue<uint64_t, Cap>>();
+    q->set_batch(batch);
     uint64_t errors = 0, received = 0;
     std::thread consumer([&] {
         for (uint64_t expect = 0; expect < n; ++expect) {
@@ -29,6 +30,7 @@ void sequence_test(uint64_t n) {
         }
     });
     for (uint64_t i = 0; i < n; ++i) q->push(i);
+    q->flush();
     consumer.join();
     EXPECT_EQ(received, n);
     EXPECT_EQ(errors, 0u);
@@ -72,6 +74,36 @@ TEST(SpscQueue, SequenceTinyCapacity) { sequence_test<2>(items_from_env(20'000'0
 TEST(SpscQueue, SequenceSmallCapacity) { sequence_test<64>(items_from_env(20'000'000) / 4); }
 // Default 20M items; set FH_SPSC_ITEMS=2000000000 for the billions run.
 TEST(SpscQueue, SequenceLargeCapacity) { sequence_test<16384>(items_from_env(20'000'000)); }
+
+// Batched index publication: same guarantees, and the ring must never
+// deadlock when one side is mid-batch while the other waits.
+TEST(SpscQueue, SequenceBatched8) { sequence_test<64>(items_from_env(20'000'000) / 4, 8); }
+TEST(SpscQueue, SequenceBatched32) { sequence_test<16384>(items_from_env(20'000'000), 32); }
+TEST(SpscQueue, SequenceBatchedTinyRing) { sequence_test<8>(items_from_env(20'000'000) / 10, 4); }
+
+TEST(SpscQueue, BatchIsClampedToHalfCapacity) {
+    SpscQueue<int, 8> q;
+    q.set_batch(1000);
+    EXPECT_EQ(q.batch(), 4u);
+    q.set_batch(0);
+    EXPECT_EQ(q.batch(), 1u);
+}
+
+// With batching, pushed items stay invisible until a batch fills or the
+// producer flushes; flush() must publish them.
+TEST(SpscQueue, FlushPublishesPartialBatch) {
+    SpscQueue<int, 64> q;
+    q.set_batch(16);
+    int v;
+    for (int i = 0; i < 5; ++i) ASSERT_TRUE(q.try_push(i));
+    EXPECT_FALSE(q.try_pop(v)) << "partial batch must not be visible yet";
+    q.flush();
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(q.try_pop(v));
+        EXPECT_EQ(v, i);
+    }
+    EXPECT_FALSE(q.try_pop(v));
+}
 
 // Full 48-byte messages: every field must arrive intact (no torn slots).
 TEST(SpscQueue, MessagePayloadIntegrity) {

@@ -35,8 +35,7 @@ def main():
     configs = sorted(p for p in args.results.iterdir() if (p / "run_stats.csv").exists())
     if not configs:
         raise SystemExit(f"no */run_stats.csv under {args.results}")
-    order = {"unpaced": 0}
-    configs.sort(key=lambda p: (order.get(p.name, 1), p.name))
+    configs.sort(key=lambda p: (0 if p.name.startswith("unpaced") else 1, p.name))
     stats = {p.name: pd.read_csv(p / "run_stats.csv") for p in configs}
 
     first = next(iter(stats.values())).iloc[0]
@@ -63,12 +62,18 @@ def main():
     for name, d in stats.items():
         m = d[d["median"] == 1].iloc[0]
         tput = f"{m.book_msgs_per_sec / 1e6:.2f} M/s ({d.book_msgs_per_sec.min() / 1e6:.2f}–{d.book_msgs_per_sec.max() / 1e6:.2f})"
-        cells = [fmt_ns(m[f"total_{k}_ns"]) for k in ("p50", "p90", "p99", "p999", "max")]
-        out.append(f"| {name} | {int(m.book_messages):,} | {tput} | " + " | ".join(cells) +
-                   f" | {fmt_ns(m.book_p50_ns)} | {fmt_ns(m.book_p99_ns)} |")
+        timed = float(m.total_max_ns) > 0 or float(m.mean_book_update_ns) > 0
+        na = "n/a"
+        cells = [fmt_ns(m[f"total_{k}_ns"]) if timed else na for k in ("p50", "p90", "p99", "p999", "max")]
+        book = [fmt_ns(m.book_p50_ns), fmt_ns(m.book_p99_ns)] if timed else [na, na]
+        out.append(f"| {name} | {int(m.book_messages):,} | {tput} | " + " | ".join(cells + book) + " |")
     out.append("")
     out.append("Run-to-run spread of end-to-end p99: " + "; ".join(
-        f"{n} {fmt_ns(d.total_p99_ns.min())}–{fmt_ns(d.total_p99_ns.max())}" for n, d in stats.items()))
+        f"{n} {fmt_ns(d.total_p99_ns.min())}–{fmt_ns(d.total_p99_ns.max())}" for n, d in stats.items()
+        if d.total_max_ns.max() > 0))
+    if any(d.total_max_ns.max() == 0 for d in stats.values()):
+        out.append("")
+        out.append("n/a: run with `--no-latency` (no per-message clock reads), to measure throughput only.")
     out.append("")
 
     logs = args.results / "logs"

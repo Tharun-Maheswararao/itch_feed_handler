@@ -204,6 +204,9 @@ curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20
 | `feed_handler verify FILE [--until 12:00:00]` | golden vs two-thread pipeline: per-message hash chain + full book state |
 | `feed_handler bench FILE --runs 5 --warmup 1 [--rate N] [--cpu-producer A --cpu-consumer B]` | timed runs, median, CSVs |
 | `feed_handler bench FILE --runs 1 --warmup 0 --view AAPL --speedup 5 --pace-from 09:30:00 --out results/logs/demo_view` | the live terminal view |
+| `feed_handler single FILE [--timed] [--cpu N]` | single-threaded parse + book; `--timed` adds the pipeline's per-message clock reads |
+| `feed_handler bench … --ring-batch 32 --no-latency` | ring index batching; throughput-only run without per-message timing |
+| `bench/diagnose.sh FILE` | pipeline-overhead experiments (batching, SMT siblings, timing on/off, `perf stat`) |
 | `feed_handler gen OUT --events N` | synthetic ITCH feed (used by CI) |
 | `micro_bench FILE` | parse-only, golden vs fast book, raw SPSC transfer |
 

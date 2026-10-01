@@ -61,6 +61,15 @@ parser runs at SSD speed instead.
 | Busy spin with `pause`/`yield` | lowest wake-up latency, at the cost of a full core per thread |
 | 16384 slots (768 KiB) | fits in L2; absorbs bursts of about 1 ms at the book's service rate |
 
+**Optional index batching** (`--ring-batch K`, default 1): each side
+publishes its index every *K* messages instead of every message, so the
+other core's copy of that cache line is invalidated *K* times less often. To
+keep progress guaranteed, a side always publishes before it would wait
+(consumer finds the ring empty, producer finds it full), and the producer
+flushes whenever it goes idle, which in paced mode means after every message,
+so batching adds no latency there. On the M4, raw two-thread transfer drops
+from 36 ns to 3 ns per message at K = 32.
+
 The end of the stream is a sentinel message (`MsgType::EndOfStream`), so the
 consumer needs no second "done" flag and nothing is lost at shutdown.
 

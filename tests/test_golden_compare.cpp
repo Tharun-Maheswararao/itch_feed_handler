@@ -65,6 +65,22 @@ TEST(GoldenCompare, PipelineWithFastBookMatchesGolden) {
     pipeline_matches_golden(*b);
 }
 
+TEST(GoldenCompare, PipelineWithBatchedRingMatchesGolden) {
+    for (std::size_t k : {8u, 32u}) {
+        auto g = std::make_unique<GoldenBook<true>>();
+        const RunResult rg = run_single(feed().data(), feed().data() + feed().size(), *g, true);
+        auto b = std::make_unique<FastBook<true>>(1 << 16);
+        PipelineOptions opt;
+        opt.verify = true;
+        opt.ring_batch = k;
+        const RunResult rp = run_pipeline(feed().data(), feed().data() + feed().size(), *b, opt);
+        EXPECT_EQ(rp.ring_batch, k);
+        EXPECT_EQ(rp.digest, rg.digest) << "ring batch " << k;
+        std::string err;
+        EXPECT_TRUE(books_equal(*g, *b, &err)) << err;
+    }
+}
+
 TEST(GoldenCompare, PipelineWithGoldenBookMatchesGolden) {
     auto b = std::make_unique<GoldenBook<true>>();
     pipeline_matches_golden(*b);
@@ -79,6 +95,7 @@ TEST(GoldenCompare, PacedPipelineStillMatches) {
     PipelineOptions opt;
     opt.verify = true;
     opt.rate = 2'000'000;  // 2M msgs/s
+    opt.ring_batch = 32;    // paced + batched: flush-on-idle must keep it moving
     const RunResult rp = run_pipeline(begin, end, *b, opt);
     EXPECT_EQ(rp.digest, rg.digest);
     std::string err;

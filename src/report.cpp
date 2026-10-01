@@ -64,7 +64,7 @@ void print_message_mix(std::ostream& os, const ParseStats& st) {
 
 void print_run(std::ostream& os, const RunRecord& rec) {
     const RunResult& r = rec.result;
-    os << "Run " << rec.run << " [" << rec.label << "]  wall " << std::fixed << std::setprecision(3) << r.wall_seconds
+    os << "Run " << rec.run << " [" << rec.label << "]" << (r.ring_batch > 1 ? "  ring batch " + std::to_string(r.ring_batch) : std::string()) << "  wall " << std::fixed << std::setprecision(3) << r.wall_seconds
        << " s   " << std::setprecision(2) << msgs_per_sec(r.parse.messages, r.wall_seconds) / 1e6
        << " M file msgs/s   " << msgs_per_sec(r.book_messages, r.wall_seconds) / 1e6 << " M book msgs/s\n";
     os << "  book msgs " << r.book_messages << "   mean book update "
@@ -137,7 +137,7 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
 
     std::ofstream s(dir + "/run_stats.csv");
     if (!s) throw std::runtime_error("cannot write " + dir + "/run_stats.csv");
-    s << "run,label,median,paced,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
+    s << "run,label,median,paced,ring_batch,wall_s,file_messages,book_messages,file_msgs_per_sec,book_msgs_per_sec,mean_book_update_ns";
     for (const char* m : {"total", "queue", "book"}) {
         for (auto p : kPcts) s << ',' << m << '_' << p.name << "_ns";
         s << ',' << m << "_max_ns," << m << "_mean_ns";
@@ -150,7 +150,7 @@ void write_csvs(const std::string& dir, const std::vector<RunRecord>& runs, cons
         const auto& rec = runs[k];
         const RunResult& r = rec.result;
         s << rec.run << ',' << csv_escape(rec.label) << ',' << (k == med) << ',' << r.paced << ','
-          << r.wall_seconds << ',' << r.parse.messages << ',' << r.book_messages << ',' << msgs_per_sec(r.parse.messages, r.wall_seconds)
+          << r.ring_batch << ',' << r.wall_seconds << ',' << r.parse.messages << ',' << r.book_messages << ',' << msgs_per_sec(r.parse.messages, r.wall_seconds)
           << ',' << msgs_per_sec(r.book_messages, r.wall_seconds) << ','
           << (r.book_messages ? r.consumer_busy_seconds * 1e9 / static_cast<double>(r.book_messages) : 0);
         for (const LatencyHistogram* hist : {&r.total, &r.queue, &r.book}) {

@@ -1,6 +1,7 @@
 // Component micro-benchmarks, single threaded unless noted:
 //   parse only, parse + golden book, parse + fast book, SPSC queue transfer.
-//   micro_bench FILE [--repeat 3]
+//   micro_bench FILE [--repeat 3] [--cpu-producer A --cpu-consumer B]
+//   The SPSC transfer is run at ring batch 1, 8 and 32.
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -31,7 +32,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: micro_bench FILE [--repeat N]\n");
         return 2;
     }
-    const int repeat = (argc > 3 && std::string(argv[2]) == "--repeat") ? std::atoi(argv[3]) : 3;
+    int repeat = 3, cpu_p = -1, cpu_c = -1;
+    for (int i = 2; i + 1 < argc; i += 2) {
+        const std::string k = argv[i];
+        if (k == "--repeat") repeat = std::atoi(argv[i + 1]);
+        if (k == "--cpu-producer") cpu_p = std::atoi(argv[i + 1]);
+        if (k == "--cpu-consumer") cpu_c = std::atoi(argv[i + 1]);
+    }
     MappedFile f(argv[1]);
     f.prefault();
 
@@ -59,26 +66,35 @@ int main(int argc, char** argv) {
     const double tf = bench_book("parse + fast book", [] { return std::make_unique<FastBook<false>>(); });
     std::printf("fast book speedup over golden (book part): %.2fx\n", (tg - t_parse) / (tf - t_parse));
 
-    // SPSC: raw transfer rate of 48-byte messages between two threads.
+    // SPSC: raw transfer rate of 48-byte messages between two threads, at
+    // several index-publication batch sizes.
     constexpr uint64_t kN = 200'000'000;
-    auto q = std::make_unique<MsgQueue>();
-    const double tq = best_of(1, [&] {
-        std::thread c([&] {
-            Msg m;
+    for (std::size_t batch : {std::size_t{1}, std::size_t{8}, std::size_t{32}}) {
+        auto q = std::make_unique<MsgQueue>();
+        q->set_batch(batch);
+        bool pinned_p = false, pinned_c = false;
+        const double tq = best_of(1, [&] {
+            std::thread c([&] {
+                pinned_c = pin_current_thread(cpu_c);
+                Msg m;
+                for (uint64_t i = 0; i < kN; ++i) {
+                    q->pop(m);
+                    sink += m.ref;
+                }
+            });
+            pinned_p = pin_current_thread(cpu_p);
+            Msg m{};
             for (uint64_t i = 0; i < kN; ++i) {
-                q->pop(m);
-                sink += m.ref;
+                m.ref = i;
+                q->push(m);
             }
+            q->flush();
+            c.join();
         });
-        Msg m{};
-        for (uint64_t i = 0; i < kN; ++i) {
-            m.ref = i;
-            q->push(m);
-        }
-        c.join();
-    });
-    std::printf("%-28s %8.3f s  %7.2f ns/msg  %7.1f M msgs/s\n", "spsc transfer (2 threads)", tq, tq * 1e9 / kN,
-                kN / tq / 1e6);
+        char name[64];
+        std::snprintf(name, sizeof name, "spsc transfer, batch %zu%s", batch, pinned_p && pinned_c ? ", pinned" : "");
+        std::printf("%-28s %8.3f s  %7.2f ns/msg  %7.1f M msgs/s\n", name, tq, tq * 1e9 / kN, kN / tq / 1e6);
+    }
     std::printf("(checksum %llx)\n", (unsigned long long)sink);
     return 0;
 }

@@ -5,8 +5,9 @@
 //   feed_handler verify FILE [--book fast|golden] [--until HH:MM:SS] [--cpu-producer N --cpu-consumer N]
 //   feed_handler bench  FILE [--book fast|golden] [--runs 5] [--warmup 1] [--out DIR] [--label NAME] [--until T]
 //                            [--rate MSGS_PER_SEC | --speedup X [--pace-from HH:MM:SS]]
-//                            [--cpu-producer N] [--cpu-consumer N]
+//                            [--cpu-producer N] [--cpu-consumer N] [--ring-batch K] [--no-latency]
 //                            [--view SYMBOL [--view-interval-ms 1000] [--record FILE] [--no-draw]]
+//   feed_handler single FILE [--book fast|golden] [--cpu N] [--timed] [--until T]
 //   feed_handler gen    OUT  [--events N] [--seed S] [--stocks K]
 #include <chrono>
 #include <cstdio>
@@ -67,7 +68,7 @@ struct Args {
 };
 
 void usage() {
-    std::cerr << "usage: feed_handler {count|golden|verify|bench|gen} FILE [options]\n"
+    std::cerr << "usage: feed_handler {count|golden|verify|bench|single|gen} FILE [options]\n"
                  "  see the header of src/main.cpp or README.md for every option\n";
 }
 
@@ -211,6 +212,8 @@ PipelineOptions pipeline_options(const Args& a) {
     o.producer_cpu = static_cast<int>(a.num("cpu-producer", -1));
     o.consumer_cpu = static_cast<int>(a.num("cpu-consumer", -1));
     o.rate = a.num("rate", 0);
+    o.ring_batch = static_cast<std::size_t>(a.num("ring-batch", 1));
+    o.measure_latency = !a.has("no-latency");
     o.speedup = a.num("speedup", 0);
     if (a.has("pace-from")) o.pace_from_ns = parse_hhmmss(a.get("pace-from"));
     return o;
@@ -347,6 +350,48 @@ int cmd_bench(const Args& a) {
     throw std::runtime_error("--book must be fast or golden");
 }
 
+// Single-threaded parse + book on one (optionally pinned) core. With --timed,
+// each book update is bracketed by the same two clock reads the pipeline's
+// book thread uses, so "book update" is measured identically in both.
+template <class Book>
+int single_with(const Args& a, std::unique_ptr<Book> book) {
+    MappedFile f(a.file());
+    f.prefault();
+    const uint8_t* end = stream_end(a, f);
+    const bool pinned = pin_current_thread(static_cast<int>(a.num("cpu", -1)));
+    const bool timed = a.has("timed");
+    LatencyHistogram h;
+    uint64_t n = 0, busy = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    const ParseStats st = parse_buffer(f.data(), end, [&](const Msg& m) {
+        if (timed) {
+            const uint64_t t1 = now_ticks();
+            apply(*book, m);
+            const uint64_t t2 = now_ticks();
+            h.record(t2 - t1);
+            busy += t2 - t1;
+        } else {
+            apply(*book, m);
+        }
+        ++n;
+    });
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("single [%s%s] %llu book msgs (%llu total) in %.3f s = %.1f ns per book msg, pinned %s\n",
+                a.get("book", "fast").c_str(), timed ? ", timed" : "", (unsigned long long)n,
+                (unsigned long long)st.messages, secs, secs * 1e9 / static_cast<double>(n), pinned ? "yes" : "no");
+    if (timed)
+        std::printf("  book update (t2-t1): mean %.1f ns  p50 %.0f  p90 %.0f  p99 %.0f  p99.9 %.0f ns\n",
+                    ticks_to_ns(static_cast<double>(busy)) / static_cast<double>(n),
+                    ticks_to_ns(static_cast<double>(h.percentile(0.5))), ticks_to_ns(static_cast<double>(h.percentile(0.9))),
+                    ticks_to_ns(static_cast<double>(h.percentile(0.99))), ticks_to_ns(static_cast<double>(h.percentile(0.999))));
+    return 0;
+}
+
+int cmd_single(const Args& a) {
+    if (a.get("book", "fast") == "golden") return single_with(a, std::make_unique<GoldenBook<false>>());
+    return single_with(a, std::make_unique<FastBook<false>>(std::size_t{1} << static_cast<int>(a.num("order-capacity-log2", 23))));
+}
+
 int cmd_gen(const Args& a) {
     if (a.pos.empty()) throw std::runtime_error("missing OUT argument");
     const auto bytes = synth::synthetic_feed(static_cast<uint64_t>(a.num("events", 1'000'000)),
@@ -369,6 +414,7 @@ int main(int argc, char** argv) {
         if (a.cmd == "verify") return cmd_verify(a);
         if (a.cmd == "bench") return cmd_bench(a);
         if (a.cmd == "gen") return cmd_gen(a);
+        if (a.cmd == "single") return cmd_single(a);
         usage();
         return 2;
     } catch (const std::exception& e) {
