@@ -14,6 +14,8 @@
 #   RUNS / WARMUP                timed runs and warmup passes (default 5 / 1)
 #   VIEW_SYMBOL                  symbol for the view-on run (default AAPL)
 #   RESULTS / DOCS               output dirs (default results / docs)
+#   PYTHON                       interpreter with pandas, matplotlib, pillow
+#                                (default: first python3 on PATH that has them)
 set -euo pipefail
 
 DATA=${1:?usage: bench/run_benchmark.sh ITCH_FILE}
@@ -30,6 +32,28 @@ RUNS=${RUNS:-5}
 WARMUP=${WARMUP:-1}
 VIEW_SYMBOL=${VIEW_SYMBOL:-AAPL}
 BUILD=$ROOT/build-bench
+
+# Find a Python that can draw the charts *before* spending 15+ minutes on the
+# benchmark. Machines often have several python3 installs (system, Homebrew,
+# python.org) and only one of them has the plotting packages.
+find_python() {
+  local c
+  for c in ${PYTHON:+"$PYTHON"} python3 /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
+           /usr/local/bin/python3 /opt/homebrew/bin/python3 /usr/bin/python3; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c "import pandas, matplotlib, PIL" >/dev/null 2>&1; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+if ! PY=$(find_python); then
+  echo "error: no python3 with pandas, matplotlib and pillow found." >&2
+  echo "       install them into the python3 you use:  python3 -m pip install pandas matplotlib pillow" >&2
+  echo "       or point the script at one that has them:  PYTHON=/path/to/python3 $0 $DATA" >&2
+  exit 1
+fi
+echo "== charts will use $PY"
 
 echo "== build (Release, native)"
 cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF >/dev/null
@@ -74,11 +98,11 @@ echo "== component micro-benchmarks"
 "$BUILD/micro_bench" "$DATA" --repeat "$MICRO_REPEAT" | tee "$RESULTS/logs/micro_bench.txt"
 
 echo "== charts"
-python3 "$ROOT/scripts/plot_results.py" --results "$RESULTS" --out "$DOCS" \
+"$PY" "$ROOT/scripts/plot_results.py" --results "$RESULTS" --out "$DOCS" \
   --configs "unpaced,$PACED,${PACED}_view"
 echo "== live view GIF (AAPL from the open, 5x real time)"
 "$BUILD/feed_handler" bench "$DATA" --runs 1 --warmup 0 --view "$VIEW_SYMBOL" --speedup 5 \
   --pace-from 09:30:00 --until 09:31:15 --view-interval-ms 250 --no-draw \
   --record "$RESULTS/logs/view_frames.txt" --label demo_view --out "$RESULTS/logs/demo_view" >/dev/null
-python3 "$ROOT/scripts/make_gif.py" "$RESULTS/logs/view_frames.txt" "$DOCS/live_book.gif" --ms 250
+"$PY" "$ROOT/scripts/make_gif.py" "$RESULTS/logs/view_frames.txt" "$DOCS/live_book.gif" --ms 250
 echo "done: CSVs in $RESULTS, charts in $DOCS"

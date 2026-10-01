@@ -1,4 +1,4 @@
-# ITCH 5.0 feed handler, Stage A
+# ITCH 5.0 feed handler
 
 ![Live AAPL book replayed from the 30 Dec 2019 Nasdaq feed](docs/live_book.gif)
 [![CI](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/workflows/ci.yml/badge.svg)](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/workflows/ci.yml)
@@ -38,48 +38,55 @@ state.
 
 | Configuration | Book msgs | Throughput | p50 | p90 | p99 | p99.9 | max |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **unpaced**, full day | 263.3 M | **6.28 M msgs/s** (5.71–6.86) | 2.36 ms | 2.88 ms | 6.82 ms | 19.9 ms | 53.3 ms |
-| **paced 2 M msgs/s**, 04:00–10:00 | 38.0 M | 2.00 M msgs/s | **191 ns** | **327 ns** | 2.29 ms | 32.5 ms | 33.5 ms |
-| paced 2 M msgs/s, **live view on** | 38.0 M | 2.00 M msgs/s | 187 ns | 303 ns | 23 µs | 1.64 ms | 5.48 ms |
+| **unpaced**, full day | 263.3 M | **7.10 M msgs/s** (7.07–7.21) | 2.23 ms | 2.42 ms | 3.08 ms | 5.51 ms | 21.5 ms |
+| **paced 2 M msgs/s**, 04:00–10:00 | 38.0 M | 2.00 M msgs/s | **183 ns** | **263 ns** | **607 ns** | 4.85 ms | 9.00 ms |
+| paced 2 M msgs/s, **live view on** | 38.0 M | 2.00 M msgs/s | 183 ns | 263 ns | 527 ns | 1.28 ms | 3.27 ms |
 
-**Book update alone** (t2 − t1), every configuration: **p50 125 ns, p99
-375–640 ns, mean 116–162 ns**.
+**Book update alone** (t2 − t1), every run of every configuration: **p50
+125 ns, p99 335–375 ns, mean 110–116 ns**.
 
 **Components** ([micro_bench log](results/logs/micro_bench.txt)):
 
 | Component | Cost |
 |---|---|
 | Parser, data in page cache ([log](results/logs/parser_cached_2GB.txt)) | **~5 ns/msg: 170–206 M msgs/s, 5.2–6.4 GB/s** |
-| Golden book (`unordered_map` + `std::map`) | 274 ns per book message |
-| Fast book (open addressing + sorted vectors) | **67 ns per book message, 4.1× faster** |
+| Golden book (`unordered_map` + `std::map`) | 274–352 ns per book message |
+| Fast book (open addressing + sorted vectors) | **63–67 ns per book message, 4.1–5.6× faster** |
 | SPSC ring, 48-byte messages, 2 threads | 18–34 ns/msg (29–55 M msgs/s), unpinned |
+
+Ranges span two separate benchmark sessions. The golden model swings more
+because its `std::map` nodes are scattered across memory, so it suffers most
+when the machine is paging.
 
 **How to read this honestly:**
 
 * **Unpaced** is a throughput test. The parser decodes over 10× faster than the
   book applies, so the ring is always full and each message waits for the
-  ~16k ahead of it. The 2.4 ms "latency" is that backlog
-  (16384 × ~145 ns), not a property of the code.
+  ~16k ahead of it. The 2.2 ms "latency" is that backlog
+  (16384 × ~140 ns), not a property of the code.
 * **Paced** releases messages on a fixed schedule at about 30% of book
   capacity, as a feed would arrive. On macOS it replays 04:00–10:00, which
-  includes the opening cross and fits in RAM. The **p50 is stable across all
-  ten runs (187–203 ns)**, and p90 is 287–327 ns in 8 of the 10.
-* **The p99 and beyond are the machine, not the code.** Paced p99 ranged from
-  7 µs to 193 ms across runs ([chart](docs/throughput_runs.png)). Stamps use
-  the *scheduled* arrival time (coordinated-omission correction), so a single
-  100 ms deschedule of a spinning thread backs up 200,000 messages, enough to
-  own the p99 of a 38 M-message run. Book-update p99 stayed at 0.4–0.6 µs
-  throughout. Pinned, isolated Linux cores are what remove this.
-* **The live view does not affect the pipeline:** p50, p90 and book-update
-  time are the same with it on. Its *better* tails are run-to-run OS noise,
-  which goes both ways.
+  includes the opening cross and fits in RAM. Across all ten paced runs,
+  **p50 is 183–187 ns and p90 is 255–279 ns**.
+* **The tail beyond p99 is the machine, not the code.** Paced p99 was
+  471 ns–6.9 µs in nine of ten runs and 52 µs in one
+  ([chart](docs/throughput_runs.png)), but p99.9 and max reach milliseconds.
+  Stamps use the *scheduled* arrival time (coordinated-omission correction),
+  so when macOS deschedules a spinning thread for a few ms, every message
+  that arrives meanwhile is charged the wait. Book-update p99 stayed at
+  335–375 ns throughout. Pinned, isolated Linux cores are what remove this.
+  An earlier session on the same Mac under heavier load (swapping) gave paced
+  p99 from 7 µs to 193 ms. The code was identical; the machine was busier.
+* **The live view does not affect the pipeline:** p50 (183 ns), p90
+  (263 ns) and book-update time are identical with it on and off. The tail
+  differences between the two are run-to-run OS noise, which goes both ways.
 * A first attempt paced at 5 M msgs/s over the full day (about 74% load, with
   the file paging from SSD) gave a p50 of 65–139 µs and a p99 from
   17 ms to 1.8 s. It is kept in
   [`results/logs/first_attempt_paced_5M/`](results/logs/first_attempt_paced_5M)
   and is why the paced configuration changed.
-* On M4, `mean book update` in the pipeline (~120 ns) is higher than the
-  single-threaded 67 ns. The measured region includes two serializing
+* On M4, `mean book update` in the pipeline (~112 ns) is higher than the
+  single-threaded 63–67 ns. The measured region includes two serializing
   `isb; mrs` clock reads, and the message line arrives from the other core.
 
 ### Charts
@@ -165,7 +172,7 @@ curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20
 | `feed_handler golden FILE --at 10:00:00,15:59:00` | single-threaded golden model; invariants; top of book at given times |
 | `feed_handler verify FILE [--until 12:00:00]` | golden vs two-thread pipeline: per-message hash chain + full book state |
 | `feed_handler bench FILE --runs 5 --warmup 1 [--rate N] [--cpu-producer A --cpu-consumer B]` | timed runs, median, CSVs |
-| `feed_handler bench FILE --view AAPL --speedup 5 --pace-from 09:30:00` | the live terminal view |
+| `feed_handler bench FILE --runs 1 --warmup 0 --view AAPL --speedup 5 --pace-from 09:30:00 --out results/logs/demo_view` | the live terminal view |
 | `feed_handler gen OUT --events N` | synthetic ITCH feed (used by CI) |
 | `micro_bench FILE` | parse-only, golden vs fast book, raw SPSC transfer |
 

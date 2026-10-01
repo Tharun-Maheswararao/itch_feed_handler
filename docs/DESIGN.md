@@ -77,7 +77,7 @@ order map, not one per stock.
 ### Golden model (kept forever)
 
 `std::unordered_map<ref, Order>` plus, for each stock, two
-`std::map<price, Level>`. It is obviously correct, slow (about 265 ns per
+`std::map<price, Level>`. It is obviously correct, slow (274–352 ns per
 message here) and never optimized. Every optimization is checked against it.
 
 ### Optimized book
@@ -107,8 +107,8 @@ best so the touch is at the back.
   for asks, so "ascending key" always means "towards the touch".
 * Level = {key, order count, total shares}: 16 bytes, four to a cache line.
 
-Measured on the full day: **about 64 ns against 265 ns per message, 4.1×** over
-the golden model.
+Measured on the full day: **63–67 ns against 274–352 ns per message, 4.1–5.6×**
+over the golden model, across two benchmark sessions.
 
 ### Semantics (identical in both books)
 
