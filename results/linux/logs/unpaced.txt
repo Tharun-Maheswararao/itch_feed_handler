@@ -2,46 +2,46 @@ CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
 OS       Linux 7.0.0-1013-aws x86_64
 Compiler gcc 13.3.0
 Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
-Clock    rdtsc @ 2400.002 MHz (0.42 ns per tick, measured resolution 15.00 ns)
+Clock    rdtsc @ 2400.004 MHz (0.42 ns per tick, measured resolution 13.33 ns)
 file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
-warmup 1 done: 79.56 s
-Run 1 [unpaced]  wall 81.608 s   3.29 M file msgs/s   3.23 M book msgs/s
-  book msgs 263250843   mean book update 266.7 ns (from summed busy time)
+warmup 1 done: 34.00 s
+Run 1 [unpaced]  latency sampled 1/16  wall 34.036 s   7.90 M file msgs/s   7.73 M book msgs/s
+  book msgs 263250843   timed 16457082   mean book update 154.0 ns   ring depth at samples p50 16384 p99 16384 max 16384
   latency         p50        p90        p99       p999        max       mean
-  total       5.13 ms    5.46 ms    6.01 ms    7.21 ms    7.41 ms    5.08 ms
-  queue       5.13 ms    5.46 ms    6.01 ms    7.21 ms    7.41 ms    5.08 ms
-  book         260 ns     406 ns     613 ns     840 ns  134.18 us     267 ns
+  total       2.13 ms    2.29 ms    2.62 ms    3.71 ms    4.43 ms    2.12 ms
+  queue       2.13 ms    2.29 ms    2.62 ms    3.71 ms    4.43 ms    2.12 ms
+  book         146 ns     286 ns     493 ns     720 ns  146.14 us     154 ns
   book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
-Run 2 [unpaced]  wall 83.238 s   3.23 M file msgs/s   3.16 M book msgs/s
-  book msgs 263250843   mean book update 272.3 ns (from summed busy time)
+Run 2 [unpaced]  latency sampled 1/16  wall 35.006 s   7.68 M file msgs/s   7.52 M book msgs/s
+  book msgs 263250843   timed 16457082   mean book update 158.9 ns   ring depth at samples p50 16384 p99 16384 max 16384
   latency         p50        p90        p99       p999        max       mean
-  total       5.24 ms    5.57 ms    6.01 ms    7.21 ms    7.72 ms    5.18 ms
-  queue       5.24 ms    5.57 ms    6.01 ms    7.21 ms    7.72 ms    5.18 ms
-  book         266 ns     413 ns     626 ns     853 ns  214.00 us     272 ns
+  total       2.18 ms    2.35 ms    2.68 ms    3.71 ms    4.51 ms    2.18 ms
+  queue       2.18 ms    2.35 ms    2.68 ms    3.71 ms    4.51 ms    2.18 ms
+  book         150 ns     300 ns     520 ns     760 ns   30.09 us     159 ns
   book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
-Run 3 [unpaced]  wall 82.712 s   3.25 M file msgs/s   3.18 M book msgs/s
-  book msgs 263250843   mean book update 270.4 ns (from summed busy time)
+Run 3 [unpaced]  latency sampled 1/16  wall 35.254 s   7.62 M file msgs/s   7.47 M book msgs/s
+  book msgs 263250843   timed 16457082   mean book update 160.3 ns   ring depth at samples p50 16384 p99 16384 max 16384
   latency         p50        p90        p99       p999        max       mean
-  total       5.24 ms    5.46 ms    6.01 ms    7.21 ms    7.55 ms    5.15 ms
-  queue       5.24 ms    5.46 ms    6.01 ms    7.21 ms    7.55 ms    5.15 ms
-  book         266 ns     413 ns     626 ns     840 ns  204.88 us     270 ns
+  total       2.24 ms    2.40 ms    2.73 ms    3.82 ms    4.51 ms    2.19 ms
+  queue       2.24 ms    2.40 ms    2.73 ms    3.82 ms    4.51 ms    2.19 ms
+  book         150 ns     300 ns     520 ns     773 ns  218.60 us     160 ns
   book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
-Run 4 [unpaced]  wall 82.697 s   3.25 M file msgs/s   3.18 M book msgs/s
-  book msgs 263250843   mean book update 270.3 ns (from summed busy time)
+Run 4 [unpaced]  latency sampled 1/16  wall 34.250 s   7.85 M file msgs/s   7.69 M book msgs/s
+  book msgs 263250843   timed 16457082   mean book update 154.3 ns   ring depth at samples p50 16384 p99 16384 max 16384
   latency         p50        p90        p99       p999        max       mean
-  total       5.13 ms    5.57 ms    6.12 ms    7.21 ms    7.56 ms    5.15 ms
-  queue       5.13 ms    5.57 ms    6.12 ms    7.21 ms    7.56 ms    5.15 ms
-  book         266 ns     413 ns     626 ns     853 ns  209.69 us     270 ns
+  total       2.13 ms    2.29 ms    2.68 ms    3.71 ms    4.50 ms    2.13 ms
+  queue       2.13 ms    2.29 ms    2.68 ms    3.71 ms    4.50 ms    2.13 ms
+  book         146 ns     286 ns     493 ns     733 ns   72.06 us     154 ns
   book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
-Run 5 [unpaced]  wall 85.649 s   3.14 M file msgs/s   3.07 M book msgs/s
-  book msgs 263250843   mean book update 280.5 ns (from summed busy time)
+Run 5 [unpaced]  latency sampled 1/16  wall 34.093 s   7.88 M file msgs/s   7.72 M book msgs/s
+  book msgs 263250843   timed 16457082   mean book update 153.5 ns   ring depth at samples p50 16384 p99 16384 max 16384
   latency         p50        p90        p99       p999        max       mean
-  total       5.35 ms    5.68 ms    6.01 ms    6.88 ms    7.91 ms    5.33 ms
-  queue       5.35 ms    5.68 ms    6.01 ms    6.88 ms    7.91 ms    5.33 ms
-  book         273 ns     440 ns     653 ns     906 ns  221.07 us     281 ns
+  total       2.13 ms    2.29 ms    2.68 ms    3.71 ms    4.34 ms    2.12 ms
+  queue       2.13 ms    2.29 ms    2.68 ms    3.71 ms    4.34 ms    2.12 ms
+  book         146 ns     286 ns     493 ns     720 ns   32.30 us     154 ns
   book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
 
-median run by throughput: run 3
+median run by throughput: run 4
 Message mix (268744780 messages, 8.25 GB)
   A     117145568   43.59%
   D     114360997   42.55%

@@ -1,0 +1,64 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1013-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2400.004 MHz (0.42 ns per tick, measured resolution 13.33 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB), prefaulting ...
+warmup 1 done: 131.63 s
+Run 1 [paced_2M_every]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   timed 263250843   mean book update 241.8 ns   ring depth at samples p50 0 p99 8 max 2387
+  latency         p50        p90        p99       p999        max       mean
+  total        453 ns     680 ns    4.37 us    8.53 us    1.28 ms     578 ns
+  queue        246 ns     306 ns    4.05 us    8.32 us    1.28 ms     336 ns
+  book         233 ns     393 ns     626 ns     906 ns  198.86 us     242 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 2 [paced_2M_every]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   timed 263250843   mean book update 241.3 ns   ring depth at samples p50 0 p99 8 max 2326
+  latency         p50        p90        p99       p999        max       mean
+  total        453 ns     680 ns    4.48 us    8.53 us    1.23 ms     577 ns
+  queue        246 ns     306 ns    4.16 us    8.11 us    1.23 ms     335 ns
+  book         233 ns     393 ns     626 ns     906 ns  192.07 us     241 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 3 [paced_2M_every]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   timed 263250843   mean book update 245.1 ns   ring depth at samples p50 0 p99 8 max 2406
+  latency         p50        p90        p99       p999        max       mean
+  total        466 ns     693 ns    4.59 us    8.75 us    1.28 ms     590 ns
+  queue        246 ns     320 ns    4.37 us    8.32 us    1.28 ms     344 ns
+  book         233 ns     400 ns     640 ns     933 ns  191.18 us     245 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 4 [paced_2M_every]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   timed 263250843   mean book update 247.5 ns   ring depth at samples p50 0 p99 9 max 2466
+  latency         p50        p90        p99       p999        max       mean
+  total        466 ns     706 ns    4.80 us    8.96 us    1.29 ms     601 ns
+  queue        246 ns     326 ns    4.48 us    8.53 us    1.29 ms     354 ns
+  book         233 ns     406 ns     653 ns     933 ns  188.71 us     247 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+Run 5 [paced_2M_every]  wall 131.626 s   2.04 M file msgs/s   2.00 M book msgs/s
+  book msgs 263250843   timed 263250843   mean book update 253.2 ns   ring depth at samples p50 0 p99 9 max 2360
+  latency         p50        p90        p99       p999        max       mean
+  total        480 ns     746 ns    5.33 us    9.39 us    1.25 ms     623 ns
+  queue        253 ns     346 ns    5.01 us    9.17 us    1.25 ms     370 ns
+  book         240 ns     420 ns     680 ns     986 ns  191.95 us     253 ns
+  book: adds 118631456  exec 5822741  cancel 2787676  delete 114360997  replace 21639067  live 0  peak 1924078  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 3
+Message mix (268744780 messages, 8.25 GB)
+  A     117145568   43.59%
+  D     114360997   42.55%
+  U      21639067    8.05%
+  E       5722824    2.13%
+  I       4024315    1.50%
+  X       2787676    1.04%
+  F       1485888    0.55%
+  P       1218602    0.45%
+  L        215161    0.08%
+  C         99917    0.04%
+  Q         17836    0.01%
+  Y          9013    0.00%
+  H          8966    0.00%
+  R          8906    0.00%
+  J            34    0.00%
+  S             6    0.00%
+  K             3    0.00%
+  V             1    0.00%
+wrote results/linux/paced_2M_every/histogram.csv and results/linux/paced_2M_every/run_stats.csv
