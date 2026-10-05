@@ -248,6 +248,11 @@ with no screen recorder involved.
 
 ## 10. What I would change next
 
+The production gaps (network input with gap recovery, an order-level book
+with no hot-path allocation, wire-to-book latency with kernel bypass) are
+planned as [Version 2](ROADMAP_V2.md). The items below are refinements of
+Version 1 itself.
+
 1. **Cheaper timestamps for the split.** Sampling (§6) fixed the cost of
    measurement: on the pinned Xeon, unpaced throughput rose from 3.18 to
    7.69 M msgs/s and paced p99 fell from 4.4–5.3 to 3.0–3.3 µs, with p50,

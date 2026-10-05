@@ -323,6 +323,20 @@ in `mode=matrix`. Each cell writes a `run_stats.csv` with `queue`,
 [`plot_matrix.py`](scripts/plot_matrix.py) rebuild the table and the five
 charts from them.
 
+## Version 2 (planned)
+
+Version 1 is a replay tool: it reads a file, measures parse-to-book latency
+and keeps aggregated price levels. [Version 2](docs/ROADMAP_V2.md) makes it
+production-shaped:
+
+1. **Network input:** UDP multicast (MoldUDP64) on two redundant lines, A/B
+   arbitration, gap detection, retransmission and snapshot recovery, tested
+   under injected loss.
+2. **Order-level book:** FIFO queue position at every price level, a
+   price-indexed array near the touch, and **zero allocation** on the hot path.
+3. **Wire-to-book latency** with NIC receive timestamps, and kernel-bypass
+   receive (AF_XDP) against `recvmmsg`, between two bare-metal hosts.
+
 ## Architecture
 
 ```mermaid
