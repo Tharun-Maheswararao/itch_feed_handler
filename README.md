@@ -329,13 +329,14 @@ Version 1 is a replay tool: it reads a file, measures parse-to-book latency
 and keeps aggregated price levels. [Version 2](docs/ROADMAP_V2.md) makes it
 production-shaped:
 
-1. **Network input:** UDP multicast (MoldUDP64) on two redundant lines, A/B
-   arbitration, gap detection, retransmission and snapshot recovery, tested
-   under injected loss.
+1. **Network input:** UDP (MoldUDP64) on two redundant lines, multicast on one
+   host and unicast between AWS hosts (a VPC has no multicast by default),
+   with A/B arbitration, gap detection, retransmission and snapshot recovery,
+   tested under injected loss.
 2. **Order-level book:** FIFO queue position at every price level, a
    price-indexed array near the touch, and **zero allocation** on the hot path.
-3. **Wire-to-book latency** with NIC receive timestamps, and kernel-bypass
-   receive (AF_XDP) against `recvmmsg`, between two bare-metal hosts.
+3. **Wire-to-book latency** with NIC receive timestamps, and three receive paths
+   compared on two bare-metal hosts: kernel `recvmmsg`, AF_XDP and DPDK.
 
 ## Architecture
 
