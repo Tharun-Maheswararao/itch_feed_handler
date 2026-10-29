@@ -80,8 +80,8 @@ the hot path must report **zero** after warmup.
 
 ## Component 4. Kernel bypass and host tuning
 
-| Piece | How |
-|---|---|
+### Receive paths
+
 Three receive paths, behind one interface so the receiver swaps between them,
 each measured on the same hosts and traffic. The result is a "what does each
 layer of bypass buy?" comparison.
@@ -101,7 +101,18 @@ Vendor kernel-bypass stacks that many trading firms use (AMD Solarflare
 Onload and `ef_vi`, NVIDIA VMA) need their own NICs, which EC2 does not
 offer. They are out of scope, but the receive interface is designed so one
 could be added as a fourth path.
-| Host | `isolcpus` / `nohz_full` for the pinned cores, IRQ affinity away from them, huge pages for the mapping, the order pool and the ring, the `performance` cpufreq governor, NUMA-local memory, all checked and printed with each result |
+
+### Host tuning
+
+| Setting | Why |
+|---|---|
+| `isolcpus` / `nohz_full` on the pinned cores | keeps the scheduler and timer ticks off them |
+| IRQ affinity away from the pinned cores | network interrupts land elsewhere |
+| huge pages for the mapping, the order pool and the ring | fewer TLB misses |
+| the `performance` cpufreq governor | no clock-speed ramping during a burst |
+| NUMA-local memory | no cross-socket memory traffic |
+
+All of these are checked and printed with each result.
 
 ## Component 5. Production hardening
 
