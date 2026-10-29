@@ -127,7 +127,12 @@ private:
 // Random walk market over `stocks` symbols: every modify targets a live order,
 // so the feed is valid, with a small share of deliberately odd events
 // (unknown references, crossed replaces) that both books must agree on.
-inline std::vector<uint8_t> synthetic_feed(uint64_t events, uint32_t seed = 42, int stocks = 16) {
+//
+// wide = true (for the order-level book) adds what a narrow walk never
+// produces: stub quotes dollars away from the touch, price jumps larger than
+// a 512-cent window, and sub-dollar stocks quoting in sub-cent increments.
+// The default (wide = false) generates exactly the same bytes as before.
+inline std::vector<uint8_t> synthetic_feed(uint64_t events, uint32_t seed = 42, int stocks = 16, bool wide = false) {
     ItchWriter w;
     std::mt19937_64 rng(seed);
     auto uni = [&](uint64_t lo, uint64_t hi) { return std::uniform_int_distribution<uint64_t>(lo, hi)(rng); };
@@ -151,6 +156,8 @@ inline std::vector<uint8_t> synthetic_feed(uint64_t events, uint32_t seed = 42, 
         mid[s] = static_cast<uint32_t>(uni(20, 500)) * 10000;
         w.stock_directory(static_cast<uint16_t>(s), ts, sym[s]);
     }
+    if (wide)  // every fifth stock trades below $1, in sub-cent increments
+        for (int s = 5; s <= stocks; s += 5) mid[s] = static_cast<uint32_t>(uni(1000, 9900));
     auto drop = [&](std::size_t i) {
         pos.erase(live[i].ref);
         if (i != live.size() - 1) {
@@ -159,7 +166,22 @@ inline std::vector<uint8_t> synthetic_feed(uint64_t events, uint32_t seed = 42, 
         }
         live.pop_back();
     };
-    auto pick_price = [&](uint16_t loc, char side) {
+    auto pick_price = [&](uint16_t loc, char side) -> uint32_t {
+        if (wide) {
+            const bool penny = loc % 5 == 0;
+            const uint32_t tick = penny ? 1 : 100;
+            if (!penny && uni(0, 49) == 0) {  // a jump bigger than the window
+                const uint32_t jump = static_cast<uint32_t>(uni(300, 900)) * 100;
+                mid[loc] = uni(0, 1) ? mid[loc] + jump : std::max<uint32_t>(20000 + jump, mid[loc]) - jump;
+            } else if (uni(0, 19) == 0) {
+                mid[loc] = std::max<uint32_t>(penny ? 200 : 10000,
+                                              mid[loc] + static_cast<uint32_t>(uni(0, 20)) * tick - 10 * tick);
+            }
+            uint32_t off = static_cast<uint32_t>(uni(0, 30)) * tick;
+            if (uni(0, 9) == 0) off = static_cast<uint32_t>(uni(300, 50000)) * tick;  // far stub quote
+            if (side == 'B') return mid[loc] > off + tick ? mid[loc] - tick - off : tick;
+            return mid[loc] + tick + off;
+        }
         if (uni(0, 19) == 0) mid[loc] = std::max<uint32_t>(10000, mid[loc] + static_cast<uint32_t>(uni(0, 20)) * 100 - 1000);
         const uint32_t off = static_cast<uint32_t>(uni(0, 30)) * 100;  // up to 30 ticks from mid
         return side == 'B' ? mid[loc] - 100 - off : mid[loc] + 100 + off;

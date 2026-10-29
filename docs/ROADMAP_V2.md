@@ -460,7 +460,7 @@ Setup steps go in `docs/AWS_BENCHMARK.md` as they are added.
 
 | Dates | Stage | Main deliverable |
 |---|---|---|
-| started Oct 29 | C0 | FIFO book, allocation counter at zero, golden hash file |
+| Oct 29 to Oct 30 ✅ | C0 | FIFO book, allocation counter at zero, golden hash file: **done** ([results](../results/v2/fifo_check_m4.txt)) |
 | Nov 23 to Nov 29 | C1 | publisher with loss injection, round-trip test passing (Thanksgiving week: lighter days) |
 | Nov 30 to Dec 6 | C2 | kernel receiver, arbitration, clean runs on one host and across AWS |
 | Dec 7 to Dec 17 | C3 | full recovery test matrix passing in CI, including snapshot resync |

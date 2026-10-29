@@ -329,8 +329,10 @@ Version 1 is a replay tool: it reads a file, measures parse-to-book latency
 and keeps aggregated price levels. [Version 2](docs/ROADMAP_V2.md) puts it on
 a real network path:
 
-* **C0** order-level FIFO book (queue position at every level) with
-  price-indexed levels near the touch and **zero hot-path allocation**
+* **C0 ✅ done:** order-level FIFO book (queue position at every level) with
+  price-indexed levels near the touch. On the full day it reproduces the
+  golden hash file at every checkpoint with **zero heap allocations**
+  ([DESIGN.md section 15](docs/DESIGN.md#15-stage-c0-the-order-level-book))
 * **C1** MoldUDP64 replay publisher with seeded loss injection
 * **C2** kernel `recvmmsg` receiver with A/B line arbitration and wire-to-book
   timestamps (hardware where available, labelled otherwise)

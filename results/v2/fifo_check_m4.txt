@@ -1,0 +1,10 @@
+FifoBook, 263250843 book msgs, 99.9 s with checkpoint hashing
+  checkpoints match golden (level digest + queue-order hash)     OK
+  final state matches golden                                     OK
+  invariants (level totals, links, window/treap placement)       OK
+  heap allocations during replay                                 OK (0)
+  no pool overflow (orders, levels, order map)                   OK
+  every stock-side got a price window                            yes
+  pools: orders 1924078 / 4194304 peak, levels 784060 / 2097152, windows 17767 / 24576
+  window moves 101507, levels created outside the window 9367166
+PASS: Stage C0 checks

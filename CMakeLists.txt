@@ -70,6 +70,16 @@ if(FH_USE_CHRONO)
 endif()
 target_link_libraries(fh_core PUBLIC Threads::Threads)
 
+# Replaces global operator new/delete with counting versions (Version 2's
+# zero-allocation proof). Linked only into tests and tools that check it.
+add_library(fh_alloc_counter STATIC src/alloc_counter.cpp)
+target_link_libraries(fh_alloc_counter PUBLIC fh_core)
+
+add_executable(golden_hashes tools/golden_hashes.cpp)
+target_link_libraries(golden_hashes PRIVATE fh_core)
+add_executable(fifo_check tools/fifo_check.cpp)
+target_link_libraries(fifo_check PRIVATE fh_alloc_counter)
+
 add_executable(feed_handler src/main.cpp)
 target_link_libraries(feed_handler PRIVATE fh_core)
 
@@ -92,9 +102,16 @@ if(FH_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
   endif()
   include(GoogleTest)
-  foreach(t parser spsc_queue order_map book golden_compare histogram seqlock queue_stress)
+  foreach(t parser spsc_queue order_map book golden_compare histogram seqlock queue_stress fifo_book)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE fh_core GTest::gtest_main)
     gtest_discover_tests(test_${t} DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600)
   endforeach()
+  # The allocation proof replaces global new/delete, which the sanitizers'
+  # own allocators also do, so it only runs in non-sanitizer builds.
+  if(NOT FH_SANITIZE)
+    add_executable(test_fifo_alloc tests/test_fifo_alloc.cpp)
+    target_link_libraries(test_fifo_alloc PRIVATE fh_alloc_counter GTest::gtest_main)
+    gtest_discover_tests(test_fifo_alloc DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600)
+  endif()
 endif()

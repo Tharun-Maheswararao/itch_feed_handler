@@ -477,3 +477,73 @@ a real improvement this ring lacks: neighbouring heap data can share the
 first or last slot's cache line. Its zero-copy `front()`/`pop()` would save a
 48-byte copy per message. Boost's bulk `push(begin, end)` is the natural API
 for the index batching measured in §10 and Stage A's diagnosis.
+
+---
+
+# Version 2 (Stage C): network path
+
+Plan: [ROADMAP_V2.md](ROADMAP_V2.md). Sections below are added as each
+stage is completed.
+
+## 15. Stage C0: the order-level book
+
+Version 1's book keeps only per-level totals. Version 2 keeps every order in
+its queue, so "how many shares are ahead of order X" has an answer, and it
+does so without allocating after construction
+([`fifo_book.hpp`](../include/fh/book/fifo_book.hpp)).
+
+**Structure, sized from the 2019-12-30 day.** A one-off probe of the real
+day decided the sizes (peak live orders 1.92 M; peak live levels 784 K, at
+most 4,227 on one stock-side; 98.4% of adds within ±256 cents of the
+same-side best; 0.51% of adds at sub-cent prices):
+
+| Piece | Choice | Capacity |
+|---|---|---|
+| orders | `Pool<OrderNode>` (free list) found through a fixed-capacity open-addressing map; overflow is a counted error, never a rehash | 4.2 M nodes; map 8.4 M slots, 75% load limit |
+| queues | intrusive doubly linked list per level, head = first in line: O(1) removal from the middle | |
+| near levels | per stock and side, a 512-slot window (one slot per cent, ±$2.56 around the touch) of level handles, plus a 512-bit bitset for best-price search | 24,576 windows (17,767 used) |
+| far levels | a pool-backed treap per stock and side, for stub quotes, sub-cent prices, and sides without a window | levels pool 2.1 M (784 K peak) |
+| window moves | a new best price outside the window recentres it; levels migrate between window and treap both ways | 101,507 moves in the day |
+
+The invariant that makes the two structures one book: a level whose price is
+a whole cent inside the window range is always in the window, never in the
+treap. `check_invariants()` checks it with every link and total.
+
+**Queue position is computed, not stored.** Walking from the head summing
+shares is O(position). Storing "shares ahead" on every order would make each
+execution at the head an O(queue length) update of everyone behind it, on
+the hot path, to speed up a query that is not.
+
+**Semantics** match ITCH and Version 1's counters: a partial cancel (X) or
+execution (E, C) keeps the order's place; a replace (U) deletes and re-adds
+at the tail, so it loses its place even at the same price and size.
+
+**Correctness, on the full day** ([log](../results/v2/fifo_check_m4.txt)):
+
+* A deliberately simple reference (`std::map` of `std::list`,
+  [`golden_fifo_book.hpp`](../include/fh/book/golden_fifo_book.hpp)) replays
+  the day and writes the
+  [golden hash file](../results/v2/golden_hashes_12302019.txt): every 2^20
+  book messages, a digest of Version 1's level hash chained after every
+  message, plus an order-level hash that walks every queue in order. Its
+  final level digest is `1f3f7b7bcfdf76de`, **identical to Version 1's**, so
+  the new reference agrees with the old golden model message by message.
+* FifoBook reproduces all 251 checkpoints and the final state, its invariants
+  hold, and **it performs zero heap allocations** across the 263 M messages
+  ([`alloc_counter.cpp`](../src/alloc_counter.cpp) replaces every form of
+  global `operator new`; a control test proves the counter sees the
+  reference book's allocations).
+* Unit tests run the queue semantics on both books, the window/treap paths
+  (far levels, sub-cent prices, recentring, deep books, capacity exhaustion),
+  and a wide synthetic feed checked against both golden models after every
+  message. Clean under AddressSanitizer and UBSan.
+
+**Speed.** On a slice that fits in RAM (04:00 to about 09:50, 63 M book
+messages), single-threaded parse + book, best of two: the order-level book is
+**17% faster** than Version 1's aggregated book (179.6 against 216.9 ns per
+message, measured back to back). The absolute numbers are inflated: the
+same Version 1 command ran at 59 ns per message in Stage A on this Mac but
+224 ns that day, on battery power, so only the ratio is meaningful until it
+is re-measured on mains power or the EC2 host. The likely reason a richer
+book is faster: an O(1) window slot replaces Version 1's linear scan into a
+sorted vector, and orders sit in a pool instead of shifting vector elements.
