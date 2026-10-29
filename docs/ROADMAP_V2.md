@@ -1,185 +1,537 @@
-# Version 2: from replay tool to production-shaped feed handler
+# ITCH Feed Handler Version 2 Plan (Stage C)
 
-Version 1 (Stages A and B) proves the core: a pinned two-thread pipeline that
-rebuilds every book from a full NASDAQ day, a lock-free ring that beats the
-industry baselines, and correctness checked after every message. It reads a
-**file**, measures **parse-to-book** latency, and keeps an **aggregated** book.
-A trading firm's feed handler reads the **network**, is judged on
-**wire-to-book** latency, and often needs **order-level** books.
+Version 1 (Stages A and B, tagged `v1.0`) reads NASDAQ ITCH from a file,
+moves messages through an SPSC ring, rebuilds an aggregated book, and proves
+correctness against a deliberately simple **golden model** after every
+message. Version 2 moves the same pipeline onto a real network path. Packets
+arrive over UDP on two redundant lines, packets get lost and recovered, and
+the book still comes out identical to the file replay. Then the receive path
+moves from kernel sockets to kernel bypass.
 
-Version 2 closes those three gaps, in order of value.
+The finish line is one results table with real numbers, a timestamp source
+on every row, and a pass on every correctness check.
 
-## The idea in one analogy
+---
 
-Version 1 sorts mail that someone already carried into the building. Version 2
-stands at the loading dock. Trucks arrive on two roads at once, some letters
-get lost on the way, and the clock starts the moment a truck pulls in, not
-when the sack is opened.
+## 1. Version 2 targets
 
-## Goals
+| Area | Version 1 | Version 2 target | Stage |
+|---|---|---|---|
+| Book | aggregated price levels (sorted vectors) | order level, FIFO queue position at every level, price-indexed levels near the touch | C0 |
+| Hot-path allocations | possible (level vectors grow, order map can rehash) | none, proven by an allocation counter that reads zero after warmup | C0 |
+| Input | memory-mapped file | the same file packed into MoldUDP64 packets by a replay publisher | C1 |
+| Transport | none | UDP on two redundant lines A and B: multicast on one host, unicast between two AWS hosts | C1, C2 |
+| Line arbitration | none | first copy of each sequence number wins; duplicates and overlaps dropped | C2 |
+| Receive path | none | kernel sockets with `recvmmsg`, then AF_XDP, then DPDK (time-boxed). Same arbitration and recovery code on every path | C2, C4 |
+| Gap handling | impossible (a file has none) | fill from the other line, then retransmit request, then snapshot resync; tested with seeded loss | C3 |
+| Latency | parser stamp → book updated | receive timestamp → book updated (wire to book), hardware stamp if available, else labelled software stamp | C2, C4 |
+| Correctness | golden model after every message | same book hash as the file replay at every checkpoint, over the network, including after recovery | C0 onward |
+| Results | Stage A/B tables | p50, p99, p99.9, max per path, plus pass/fail on book match after loss | C4 |
 
-| Goal | Version 1 | Version 2 target |
+---
+
+## 2. Architecture
+
+```mermaid
+flowchart LR
+    F[ITCH file] --> P[Replay publisher + loss injection]
+    P -->|Line A| R[Receiver thread]
+    P -->|Line B| R
+    R --> ARB[Arbiter, gap detector, reorder buffer]
+    ARB -->|both lines missed| RQ[[SPSC: requests]]
+    RQ --> REC[Recovery thread]
+    REC <-->|MoldUDP64 re-request| RS[Retransmit server]
+    REC -->|gap too old or too large| SNAP[Snapshot server]
+    REC --> RR[[SPSC: recovered packets]]
+    RR --> ARB
+    ARB --> Q[[SPSC ring]]
+    Q --> B[Book builder thread]
+    B --> OUT[Latency histogram, checkpoint hashes, counters]
+```
+
+**Threads on the receiving host**
+
+| Thread | Core | Job |
 |---|---|---|
-| Input | memory-mapped file | UDP (MoldUDP64) on two redundant lines: multicast on one host, unicast between AWS hosts (see "Multicast on AWS") |
-| Gaps | impossible (a file has none) | detected, recovered, and verified |
-| Latency measured | parse stamp → book updated | NIC receive timestamp → book updated (wire-to-book) |
-| Book | aggregated price levels | order-level, FIFO queue position at every level |
-| Hot-path allocation | possible (level vectors grow, order map can rehash) | none, proven by an allocation counter |
-| Correctness | golden model after every message | the same, over the network path, including after recovery |
+| Receiver | pinned, isolated | busy-polls both lines, stamps packets, arbitrates, detects gaps, pushes messages into the SPSC ring |
+| Book builder | pinned, isolated, a different physical core | pops messages, updates the book, records wire-to-book latency, computes checkpoint hashes |
+| Recovery | not pinned | sends retransmit or snapshot requests, hands recovered packets back to the receiver through a second SPSC ring |
 
-## Component 1. Network replay and A/B line arbitration
+One receiver thread polls both lines and arbitrates inline, so arbitration is
+single-threaded: no locks and no extra queue hop. Recovery runs on its own
+thread so a slow retransmit never stalls the fast path. All queues are the
+Version 1 `SpscQueue`.
 
-| Piece | What it does |
+**Hosts**
+
+| Host | Runs |
 |---|---|
-| `itch_publisher` | Replays the ITCH day as **MoldUDP64** packets (session, sequence number, message count, then length-prefixed messages) on two lines, A and B, at a configurable rate or following the ITCH timestamps. The transport is selectable: two **multicast** groups, or two **unicast** destinations (the default between AWS hosts) |
-| Fault injection | Drops, duplicates, reorders and delays packets per line by configurable rates (for example 0.1% loss on A, 0.1% on B, never the same packet on both) |
-| Receiver | One thread per line reads packets (`recvmmsg` first, kernel bypass in Component 4). An **arbiter** takes each sequence number from whichever line delivers it first and drops the duplicate |
-| Re-request server | MoldUDP64 retransmission: the receiver sends a UDP re-request (session, sequence number, count) and gets the missing messages back, so gaps lost on *both* lines can be recovered |
-| Snapshot | Late-join and unrecoverable gaps resync from a book snapshot (the GLIMPSE model, which Nasdaq serves over SoupBinTCP): load the snapshot, then apply only messages after its sequence number |
+| Publisher host | replay publisher, retransmit server, snapshot server |
+| Receiver host | receiver, book builder, recovery thread |
 
-**Multicast on AWS.** A VPC does not carry IP multicast by default: it needs
-a Transit Gateway with a multicast domain, which adds cost and setup. So the
-plan is:
+On one Linux host, both roles run in two network namespaces joined by a veth
+pair (see C2).
 
-| Where | Transport | What it tests |
+---
+
+## 3. Repo layout
+
+The Version 1 layout stays; Version 2 adds directories beside it rather than
+moving code that Stages A and B depend on.
+
+| Path | Contents | Status |
 |---|---|---|
-| One machine (development, CI) | real multicast over loopback (`IP_MULTICAST_LOOP`) | group join (IGMP), multicast sockets, arbitration and recovery |
-| Two AWS hosts (benchmark) | unicast UDP, one destination port per line | the same arbitration, recovery and receive paths across a real network |
-| Optional | multicast through a Transit Gateway multicast domain | multicast end to end on AWS, if the extra cost is worth it |
+| `include/fh/parser/` | ITCH parser, message struct, mmap | Version 1 |
+| `include/fh/book/` | golden and fast aggregated books; **new** `fifo_book.hpp` (order level), `golden_fifo_book.hpp` (its reference), `pool.hpp`, `fixed_hash_map.hpp`, order-level hash | C0 |
+| `include/fh/queue/` | SPSC ring and Stage B baselines | Version 1 |
+| `include/fh/stats/` | clock, histogram, report; **new** `alloc_counter.hpp` | C0 |
+| `include/fh/mold/` | MoldUDP64 encoder and decoder | C1 |
+| `include/fh/net/` | receive paths behind one interface (`recvmmsg`, AF_XDP, DPDK) | C2, C4 |
+| `include/fh/arb/` | arbiter, gap detector, reorder buffer | C2, C3 |
+| `include/fh/recovery/` | retransmit client and server, snapshot client and server | C3 |
+| `tools/` | `itch_publisher`, `golden_hashes` (checkpoint hashes from the file replay) | C0, C1 |
+| `tests/`, `bench/`, `docs/` | as in Version 1, extended per stage | all |
 
-The arbiter, recovery and receive code are identical in all three; only the
-socket setup and the destination address change.
+The common receive interface is the key design choice. Every transport
+delivers the same thing, so everything after it is shared code and the
+latency comparison is fair:
 
-| Design choice | Why |
-|---|---|
-| Arbitrate on the MoldUDP64 sequence number, not arrival order | The two lines take different network paths; the first copy to arrive wins, with no double application |
-| A bounded gap buffer while waiting for recovery | Messages after a gap are held, not applied, so the book never sees them out of order |
-| Gap counters and recovery latency in the report | A feed handler that silently stalls on a gap is worse than one that is slow |
+```cpp
+enum class TsSource : uint8_t { Hardware, KernelSoftware, UserPoll };
 
-## Component 2. Order-level book with queue position, zero allocation
+struct RxPacket {
+    const uint8_t* data;
+    uint32_t len;
+    uint8_t line;        // 0 = A, 1 = B
+    uint64_t rx_ns;      // on the clock the book thread also reads (see C2)
+    TsSource ts_source;
+};
 
-| Structure | Version 1 | Version 2 |
+class RxPath {
+public:
+    virtual ~RxPath() = default;
+    virtual int poll(RxPacket* out, int max) = 0;  // never allocates
+    virtual void release(int count) = 0;           // returns buffers to the ring
+};
+```
+
+The virtual call is once per *batch* of packets, not per message.
+
+---
+
+## 4. Stage C0. Order-level book and allocation proof
+
+Everything here is **new work**: Version 1's book aggregates levels and
+uses sorted vectors, and its hash cannot see queue order.
+
+### Order-level FIFO book
+
+Every price level holds its orders in arrival order, so "how many shares sit
+ahead of order X" can be answered at any moment.
+
+| Structure | Choice | Why |
 |---|---|---|
-| Level contents | total shares + order count | an intrusive FIFO list of orders, so every order knows its queue position |
-| Orders | open-addressing map of order state | the same map, pointing into a preallocated **order pool** (free list, no `new`) |
-| Price levels | sorted vector per side | a **price-indexed array** around the touch (O(1) level lookup), plus a fallback tree for deep levels, all from preallocated pools |
-| Capacity | grows if needed | sized from the measured peak (1.92 M live orders on 2019-12-30) plus headroom; overflow is a counted, reported error |
+| Order lookup | preallocated open-addressing map, reference → order slot. **Fixed capacity: overflow is a counted error, never a rehash** | constant time, no allocation |
+| Order storage | fixed pool of order nodes with a free list | adding an order never calls `new` |
+| Level contents | intrusive doubly linked list of orders, head = first in queue; level keeps total shares and count | O(1) cancel and delete from the middle |
+| Levels near the touch | per stock and side, a **price-indexed window** of level handles (one slot per tick) with a **bitset** for best-price search | O(1) lookup where nearly all activity happens |
+| Levels far from the touch | a pool-backed ordered tree (treap) per stock and side | correct for any price, including stub quotes and sub-penny prices that do not fit the window |
+| Window recentre | when the touch moves out of the window, migrate levels between window and tree | rare; counted |
+| Queue position | walk from the head summing shares (exact, O(position)); a running "shares ahead" is not kept, because every execution at the head would update every order behind it | the trade-off is explained in the design doc |
+| Sizing | pools sized from measured peaks (live orders peaked at 1.92 M on 2019-12-30; live levels measured in C0) plus headroom | no growth on the hot path |
 
-New queries: queue position and shares ahead of a given order; top-N levels
-with their order lists. A global `operator new` hook counts allocations, and
-the hot path must report **zero** after warmup.
+### Message handling (ITCH semantics)
 
-## Component 3. Wire-to-book latency with hardware timestamps
-
-| Piece | How |
+| Message | Book effect |
 |---|---|
-| Receive timestamp | `SO_TIMESTAMPING` with hardware RX timestamps where the NIC and driver support them. Support on EC2 varies by instance type and ENA driver version, so check with `ethtool -T` on the chosen instance before relying on it; a software timestamp (`SO_TIMESTAMPNS`) is the measured fallback |
-| Clock alignment | Convert NIC (PHC) time to the TSC once per second, so stamps from the two clocks are comparable; report the conversion error |
-| Points | NIC receive → packet decoded → message in ring → book updated, so each stage is visible |
-| Honest reporting | Keep sampled timing and the coordinated-omission correction from Version 1; report gaps and recoveries next to the latency they caused |
+| A, F (add) | append to the tail of the level |
+| E, C (executed) | reduce shares on that order; remove it at zero |
+| X (cancel) | reduce shares; **the order keeps its place** in the queue |
+| D (delete) | unlink from the level |
+| U (replace) | delete the old order, add the new reference at the **tail** with the new price and shares: it **loses** its queue position. Side and stock are kept (spec 1.4.5) |
 
-## Component 4. Kernel bypass and host tuning
+A partial cancel keeps priority; a replace loses it. That is a classic
+interview question.
 
-### Receive paths
+### Allocation counter
 
-Three receive paths, behind one interface so the receiver swaps between them,
-each measured on the same hosts and traffic. The result is a "what does each
-layer of bypass buy?" comparison.
+Override every global `operator new` and `operator delete` (plain, array,
+sized, aligned, `nothrow`) in one translation unit linked only into tests and
+benchmarks, bumping an atomic counter. Construct the book, run a warmup, read
+the counter, replay the day, read it again: the difference must be zero.
 
-| Path | How | Trade-off |
+### Book hash
+
+Two hashes, for two purposes:
+
+| Hash | Computed | Proves |
 |---|---|---|
-| `recvmmsg` (baseline) | standard kernel UDP sockets, batched receive | simplest; the full kernel network stack on every packet |
-| AF_XDP | an XDP program redirects only the feed's UDP ports to user-space XDP sockets; all other traffic stays with the kernel | keeps the interface usable for SSH and tools; zero-copy mode depends on the ENA driver and kernel version, so measure which mode runs |
-| DPDK | the ENA poll-mode driver owns a dedicated network interface; a pinned core polls it | usually the lowest-latency software path, but DPDK has no IP stack: Ethernet/IP/UDP parsing, ARP (or static neighbour entries) and multicast joins are this project's job |
+| Level hash (Version 1) | incrementally, after every message | the aggregated view still matches the Version 1 golden model, message by message |
+| Order-level hash (new) | every 1 M messages and at the end: walk every stock, both sides, levels in price order, orders in queue order, hashing reference, price and shares | queue order matches the order-level reference exactly |
 
-DPDK on EC2 needs a **second network interface (ENI)** per host bound to
-`vfio-pci`, so the primary interface keeps SSH and the GitHub runner alive.
-ENA's low-latency queue mode needs write-combining support in `vfio-pci`;
-check that on the chosen AMI before relying on it.
+`tools/golden_hashes` runs the file replay through a simple order-level
+reference (`std::map<price, std::list<order>>`) and writes both hash
+sequences to a file. Every later stage compares against that file.
 
-Vendor kernel-bypass stacks that many trading firms use (AMD Solarflare
-Onload and `ef_vi`, NVIDIA VMA) need their own NICs, which EC2 does not
-offer. They are out of scope, but the receive interface is designed so one
-could be added as a fourth path.
+### Done when
 
-### Host tuning
-
-| Setting | Why |
+| Check | Pass condition |
 |---|---|
-| `isolcpus` / `nohz_full` on the pinned cores | keeps the scheduler and timer ticks off them |
-| IRQ affinity away from the pinned cores | network interrupts land elsewhere |
-| huge pages for the mapping, the order pool and the ring | fewer TLB misses |
-| the `performance` cpufreq governor | no clock-speed ramping during a burst |
-| NUMA-local memory | no cross-socket memory traffic |
+| Golden model match | FIFO book and the simple order-level reference give the same order-level hash at every checkpoint; its aggregated view matches the Version 1 golden model after every message |
+| Allocation counter | zero after warmup across a full day of ITCH |
+| Queue position tests | partial cancel keeps place, execute at head, replace loses priority, delete from the middle, replace that moves level |
+| Speed | measured against the Version 1 fast book; any slowdown from tracking order lists is reported, not hidden |
 
-All of these are checked and printed with each result.
+---
 
-## Component 5. Production hardening
+## 5. Stage C1. MoldUDP64 replay publisher
 
-| Piece | Why |
+### Packet format
+
+| Field | Size | Notes |
+|---|---|---|
+| Session | 10 bytes | ASCII, fixed for the run |
+| Sequence number | 8 bytes | big endian, sequence of the first message in the packet |
+| Message count | 2 bytes | 0 = heartbeat, 0xFFFF = end of session |
+| Message blocks | variable | each block is a 2-byte big-endian length followed by one ITCH message |
+
+Pack as many messages as fit under a payload limit, starting at 1400 bytes so
+packets stay under a standard MTU.
+
+### Publisher features
+
+| Feature | Purpose |
 |---|---|
-| Counters exported once per second (messages, gaps, recoveries, ring depth, latency percentiles) | A feed handler must be watched while it runs |
-| Session handling | Start of day, end of day, session change, and restart mid-day from a snapshot |
-| No exceptions or allocation after warmup, checked in CI | Predictable latency |
-| Deterministic replay of any captured session, bit for bit | Every production incident becomes a reproducible test |
+| Send on line A and line B | same packets, two sockets, two destinations (multicast groups or unicast ports) |
+| Pace modes | full speed, fixed messages per second, original ITCH timestamps scaled by a factor (reusing Version 1's pacing) |
+| Heartbeats | one per second when idle, so the receiver can spot a dead line |
+| Loss injection | drop probability per line, burst drops, the same sequence dropped on both lines, duplicates, reordering |
+| Seeded randomness | the same seed gives the same drops, so a failing test replays exactly |
+| Packet log | which sequence numbers were dropped on which line, for test assertions |
 
-## Testing
+Loss injection lives in the publisher on purpose: it is deterministic and
+works on every host. Linux `tc netem` is a good second check later, not a
+dependency.
 
-| Test | What it proves |
+### Done when
+
+| Check | Pass condition |
 |---|---|
-| MoldUDP64 encode/decode unit tests | Packet framing, sequence numbers and message counts are exact |
-| Arbitration under fault injection | With random loss, duplication and reordering on both lines, the applied sequence is exactly 1, 2, 3 … and the book hash matches the golden model at every checkpoint |
-| Gap recovery | Gaps on both lines are recovered from the re-request server; unrecoverable gaps trigger a snapshot resync, and the book still matches afterwards |
-| Queue position | Order-level book vs a reference that replays every order's FIFO history; queue positions match after every message |
-| Zero allocation | The allocation counter reads 0 across the timed section of a full-day replay |
-| Everything from Version 1 | Stress, sanitizers, and the deliberate-bug check keep running in CI |
+| Round trip | decoding every packet and concatenating the messages reproduces the original file byte for byte |
+| Pace accuracy | measured send rate within a few percent of the requested rate |
+| Determinism | two runs with the same seed drop the same sequence numbers |
 
-## Benchmark method
+C1 runs on the Mac (macOS has UDP and loopback multicast); everything from C2
+onward that needs namespaces, AF_XDP or DPDK is Linux only.
 
-The publisher and receiver run on **two separate bare-metal hosts** in one EC2
-cluster placement group, so packets cross a real network, using unicast UDP
-for the two lines (see "Multicast on AWS"). Report wire-to-book
-p50 / p90 / p99 / p99.9 / max at a fixed rate and following the ITCH
-timestamps, with and without injected loss, for `recvmmsg`, AF_XDP and DPDK. Record
-the NIC, driver, kernel, tuning and timestamp source with every result, as in
-Version 1.
+---
 
-## Build plan
+## 6. Stage C2. Kernel socket receiver and arbitration
 
-| Work | Done when |
+### Receive path
+
+Nonblocking UDP sockets, one per line, busy-polled with `recvmmsg` so one
+system call returns a batch. Buffers and `mmsghdr` arrays are preallocated at
+startup. Set `SO_RCVBUF` high and read the drop counters in `/proc/net/udp`
+after every run, because kernel drops are otherwise invisible.
+
+### Arbitration
+
+The receiver keeps one number: the next sequence it expects.
+
+| Packet's sequence range | Action |
 |---|---|
-| MoldUDP64 publisher + single-line receiver on localhost | Full day received over UDP; the book matches the golden model at every checkpoint |
-| Two lines + arbiter + fault injection | Zero mismatches with random loss, duplication and reordering on both lines |
-| Re-request server + snapshot resync | Every injected gap recovered or resynced; book still matches |
-| Order-level book with pools and a price-indexed array | Queue positions match the reference; allocation counter 0 after warmup |
-| Hardware RX timestamps and PHC→TSC conversion | Wire-to-book percentiles reported, with the conversion error |
-| Multicast over loopback + unicast transport | Both transports pass the same arbitration and recovery tests; the book matches the golden model |
-| AF_XDP receive path | Measured against `recvmmsg` on two bare-metal hosts |
-| DPDK receive path (second ENI, ENA poll-mode driver) | Same traffic and tests as the other two paths; the three-way comparison table and chart |
-| Host tuning, counters, session handling | Results table includes the tuning; counters exported live |
-| README and design doc | Version 2 results below Version 1, with the trade-offs explained |
+| ends before expected | duplicate from the other line: drop it |
+| starts before expected, ends after | overlap: skip the messages already applied, apply the rest |
+| starts at expected | apply every message, advance expected |
+| starts after expected | gap: store the packet in the reorder buffer and start a gap timer |
 
-## Deliverables
+After applying a packet, drain the reorder buffer while its next packet
+starts at the expected sequence. The overlap row matters because the two
+lines may pack messages differently; tests cover it even though this
+publisher sends identical packets.
 
-1. Publisher, receiver, arbiter, re-request server and snapshot resync, all tested under fault injection.
-2. Order-level book with queue position and a zero-allocation hot path.
-3. Wire-to-book latency tables and charts for `recvmmsg`, AF_XDP and DPDK, with and without loss.
-4. CI covering the new tests and the full Version 1 suite.
-5. Design doc sections on arbitration and recovery, the order-level book, timestamping, and kernel bypass.
+### Multicast on one host (Linux)
 
-## Cost and prerequisites
+Two network namespaces joined by a veth pair: the publisher sends to
+multicast groups on one side, the receiver joins them with
+`IP_ADD_MEMBERSHIP` on the other. This exercises real group membership,
+which loopback alone does not. It runs in Linux CI and, on the Mac, inside a
+privileged Linux container; macOS itself has no network namespaces.
 
-* Two bare-metal EC2 hosts in a cluster placement group for the network
-  benchmark (several dollars per hour each, for a run of about an hour).
-  Everything before that develops on one machine over loopback.
-* Hardware RX timestamps and zero-copy AF_XDP depend on instance type,
-  driver and kernel. Both are checked on the chosen hosts before the
-  benchmark; where they are not available, the fallback is measured and the
-  results say so.
-* The vCPU quota (now 192) already covers two `c7i.metal-24xl` hosts.
-* DPDK needs a second ENI per host, which the IAM role and launch
-  configuration must allow (the current role does not create network
-  interfaces). The setup script will need a matching update.
-* Real multicast across hosts would add a Transit Gateway multicast domain,
-  billed per attachment-hour and per GB. It is optional: the unicast benchmark
-  measures the same code.
+### Unicast between AWS hosts
+
+A VPC does not carry IP multicast without a Transit Gateway multicast domain
+(extra cost, optional). Between two EC2 hosts the publisher sends unicast UDP
+to two ports on the receiver, one per line. The receiver does not care:
+arbitration only looks at sequence numbers. Both hosts go in one cluster
+placement group.
+
+### Timestamps and the latency definition
+
+| Point | Stamp |
+|---|---|
+| Packet arrives | `SO_TIMESTAMPING`: hardware receive stamp if the NIC and driver provide one (check with `ethtool -T`), else the kernel software receive stamp |
+| Book updated | `clock_gettime(CLOCK_REALTIME)` right after the book change, the clock both stamp kinds are expressed in |
+| Wire to book | book stamp minus arrival stamp, on Version 1's sampled timing (1 in 16) |
+
+A hardware stamp comes from the NIC's own clock (PHC); `phc2sys` keeps the
+system clock synchronised to it, and its reported offset goes in the results.
+Without hardware support, the results say "kernel software receive
+timestamp", never "NIC stamp".
+
+### Done when
+
+| Check | Pass condition |
+|---|---|
+| Clean run on one host | every checkpoint hash matches the golden file, zero gaps |
+| Clean run across two AWS hosts | every checkpoint hash matches |
+| Duplicates | every message applied exactly once with both lines live |
+| One line down | kill line A mid-run; the book still matches |
+| Timestamp source | recorded for every run |
+
+---
+
+## 7. Stage C3. Gap detection, recovery and verification
+
+### Recovery order
+
+| Step | What happens |
+|---|---|
+| 1 | gap detected, packet stored in the reorder buffer, gap timer starts |
+| 2 | if the other line fills the gap before the timer fires: drain, done |
+| 3 | if the timer fires, the recovery thread sends a MoldUDP64 re-request for the missing range |
+| 4 | the server replies with MoldUDP64 packets for that range; recovery hands them to the receiver |
+| 5 | the receiver applies them in order and drains the reorder buffer |
+| 6 | on timeout, retry with backoff |
+| 7 | **if the gap is unrecoverable** (beyond the server's retention, too many retries, or a late join): request a **book snapshot** as of sequence S, load it, discard buffered messages up to S, continue from S + 1 |
+
+The gap timer is configurable: start at a few hundred microseconds on one
+host, then tune it to the measured skew between lines A and B.
+
+### Retransmit server
+
+A re-request holds the session, the first missing sequence number and a
+message count. The server indexes sequence number → file offset at startup,
+so it answers any request without scanning. It caps the count per request and
+rate-limits each client, as exchanges do, so one client cannot flood it.
+
+### Snapshot server
+
+Serves the book state as of a sequence number (the Nasdaq GLIMPSE model,
+which it serves over SoupBinTCP; here a simple TCP stream): every live order
+with its queue position, then the sequence number the snapshot is valid at.
+Built by replaying the file to that sequence, so it is exact by construction.
+
+### Reorder buffer
+
+A fixed ring indexed by sequence number modulo capacity, packet bytes copied
+into preallocated slots. A gap larger than the buffer stops buffering and
+falls back to recovering the whole range (or a snapshot). Counted.
+
+### Hot-path rule
+
+The receiver never blocks on recovery: requests go out through an SPSC ring
+to the recovery thread, recovered packets come back through a second one that
+the receiver checks every loop.
+
+### Test matrix
+
+| Scenario | Expected result |
+|---|---|
+| random 1% loss on line A only | line B fills every gap, zero re-requests |
+| random 1% loss on both lines, independent | most gaps filled by the other line, a few re-requests |
+| same sequence dropped on both lines | re-request fills it |
+| burst of 500 packets dropped on both lines | re-requests fill it, possibly in several requests |
+| gap bigger than the reorder buffer | fallback path triggers, book still matches |
+| duplicates and reordering | each message applied once |
+| retransmit server down for a while | retries, then recovers when it returns |
+| gap beyond retention, or a late join | snapshot resync, book matches from that point |
+| line A dies permanently | run completes on line B alone |
+
+Every scenario ends with every checkpoint hash matching the golden file. Each
+runs with three seeds in CI on the single-host setup, plus a long soak run
+with random seeds.
+
+### Done when
+
+| Check | Pass condition |
+|---|---|
+| Test matrix | every row passes, every seed |
+| Recovery stats | gaps seen, filled by the other line, filled by re-request, filled by snapshot, and recovery time p50 / p99, all in the results |
+| Allocation counter | still zero after warmup, even under heavy loss |
+
+---
+
+## 8. Stage C4. Kernel bypass
+
+### AF_XDP first
+
+AF_XDP keeps the NIC with the kernel but lets a small XDP program redirect
+the feed's UDP packets straight into memory the process reads. It is easier
+than DPDK and SSH keeps working.
+
+| Step | Detail |
+|---|---|
+| XDP program | match the feed's UDP ports, redirect to the AF_XDP socket, pass everything else to the kernel |
+| UMEM | one preallocated region, fill and completion rings set up at startup |
+| Polling | busy-poll the receive ring on the receiver core |
+| Parsing | strip Ethernet, IP and UDP headers, then hand the payload to the same arbiter |
+| Mode | record whether zero-copy or copy mode ran; ENA support depends on driver and kernel |
+
+Timestamps: newer kernels can pass a hardware receive stamp through XDP
+metadata functions, only if the driver supports it. Otherwise stamp in user
+space when reading the descriptor, and label it "user-space poll stamp",
+which is later than a NIC stamp.
+
+### DPDK, time-boxed
+
+DPDK takes a NIC away from the kernel entirely. EC2's ENA has a DPDK
+poll-mode driver.
+
+| Step | Detail |
+|---|---|
+| Second interface | attach a second ENI to the receiver and give it to DPDK; the first keeps SSH and the GitHub runner |
+| Bind | bind it to `vfio-pci` (ENA's low-latency queues need write-combining support) |
+| Huge pages | reserved at boot |
+| Receive | `rte_eth_rx_burst` in a busy loop, the same parsing and arbiter |
+| Timestamp | hardware offload if the driver supports it, else the cycle counter right after the burst, labelled |
+
+If DPDK takes more than three days, stop: ship Version 2 with AF_XDP and list
+DPDK as future work. The AWS role and setup script need permission to create
+the second ENI first.
+
+### Done when
+
+| Check | Pass condition |
+|---|---|
+| Correctness | the full test matrix passes over AF_XDP, and over DPDK if built |
+| Results table | every row filled with real numbers and its timestamp source |
+| Kernel drops | zero during benchmark runs, or reported |
+
+---
+
+## 9. Benchmark method
+
+| Rule | Why |
+|---|---|
+| Two **bare-metal** hosts (for example two `c7i.metal-24xl`, within the 192-vCPU quota) in one cluster placement group | Version 1 measured VM noise inflating same-core p99 about 100×; bare metal gives honest tails |
+| `isolcpus` / `nohz_full` on receiver and book cores, threads pinned | the scheduler and timer ticks stay off them |
+| NIC interrupts steered away from those cores, `irqbalance` stopped | interrupts on a hot core ruin the tail, and `irqbalance` undoes the steering |
+| Huge pages for the book pools, reorder buffer, rings and UMEM | fewer TLB misses |
+| `performance` cpufreq governor, NUMA-local memory | no frequency ramping during bursts, no cross-socket memory traffic |
+| Same build flags for every path; one warmup, five runs, median reported | fair and repeatable |
+| Three load levels: original pace, 10× pace, full speed | shows how latency degrades under load |
+| Raw histograms stored, not only percentiles | charts can be regenerated |
+| Instance type, kernel, driver, NIC, timestamp source, `phc2sys` offset, tuning recorded | reproducible and honest |
+| Run through the existing EC2 workflow (new two-host mode), which always terminates instances | no forgotten hosts |
+
+### Results table
+
+| Path | Timestamp source | p50 | p99 | p99.9 | Max | Messages/s | Book match after loss |
+|---|---|---|---|---|---|---|---|
+| File replay (Version 1, parse to book) | cycle counter | | | | | | reference |
+| Kernel sockets, one host | | | | | | | |
+| Kernel sockets, two AWS hosts | | | | | | | |
+| AF_XDP | | | | | | | |
+| DPDK | | | | | | | |
+
+Plus one chart: the latency distribution per path on a log scale, where tail
+differences show far more clearly than in a table.
+
+---
+
+## 10. AWS setup
+
+| Item | Choice |
+|---|---|
+| Instances | two bare-metal compute-optimised hosts with ENA, one cluster placement group |
+| OS | a recent Ubuntu LTS, so AF_XDP support is current |
+| Interfaces | one ENI for SSH and the runner on both; a second on the receiver for DPDK in C4 |
+| Hardware timestamps | checked with `ethtool -T` on the exact instance type before C2; answer recorded |
+| Automation | the Version 1 benchmark workflow (OIDC role, launch, results PR, guaranteed termination) extended to launch two hosts |
+| Cost control | instances terminated by the workflow after every run; a billing alert on the account |
+
+Setup steps go in `docs/AWS_BENCHMARK.md` as they are added.
+
+---
+
+## 11. Timeline
+
+| Dates | Stage | Main deliverable |
+|---|---|---|
+| started Oct 29 | C0 | FIFO book, allocation counter at zero, golden hash file |
+| Nov 23 to Nov 29 | C1 | publisher with loss injection, round-trip test passing (Thanksgiving week: lighter days) |
+| Nov 30 to Dec 6 | C2 | kernel receiver, arbitration, clean runs on one host and across AWS |
+| Dec 7 to Dec 17 | C3 | full recovery test matrix passing in CI, including snapshot resync |
+| Dec 18 to Dec 31 | C4 | AF_XDP, DPDK if time allows, results table and chart |
+| early January | polish | README, résumé bullet, interview drill |
+
+If finals squeeze C3: cut DPDK, never cut recovery testing.
+
+Also due in late December: the GitHub token used by the EC2 workflow expires
+around December 30, so renew it before the C4 runs.
+
+---
+
+## 12. README and résumé
+
+### README must include
+
+| Section | Content |
+|---|---|
+| Summary | what it does and the headline numbers |
+| Architecture | the diagram above |
+| Results | table and chart, timestamp source on every row |
+| Correctness | the test matrix, and how the two hashes prove equality |
+| Design decisions | why one receiver thread, why SPSC rings, why recovery is off the hot path, why the queue position is computed rather than stored |
+| Limitations | replayed data not a live feed; unicast between AWS hosts; timestamp-source caveats |
+
+### Résumé bullet template (numbers only once measured)
+
+> Built a C++20 NASDAQ ITCH feed handler receiving MoldUDP64 over redundant
+> A/B lines with sequence arbitration, retransmit and snapshot recovery,
+> rebuilding an order-level FIFO book with zero hot-path allocations.
+> Achieved [p50] / [p99.9] wire-to-book latency over AF_XDP, [X]× lower
+> p99.9 than kernel sockets, with identical book state to file replay under
+> [N]% injected packet loss.
+
+---
+
+## 13. Interview questions to answer without notes
+
+| Stage | Questions |
+|---|---|
+| C0 | Why does a partial cancel keep queue priority but a replace lose it? How do you compute shares ahead of an order, and why not store it? How do you prove no allocations happen? Why can't the Version 1 hash prove queue order? |
+| C1 | Why sequence numbers per message, not per packet? What does a heartbeat tell the receiver? |
+| C2 | Why A and B lines at all? What if line B is always 50 µs behind A? Why `recvmmsg` over `recv`? Why is a software receive stamp later than a NIC stamp? |
+| C3 | How long should the gap timer be, and what breaks if it is too short or too long? What stops a retransmit storm? What if the gap is bigger than the buffer? When do you give up and take a snapshot? |
+| C4 | What does AF_XDP skip compared with a socket? What does DPDK skip beyond that? Why is a user-space stamp not a fair NIC stamp? |
+| Overall | Where does the remaining latency go? What would change on exchange-colocated hardware with a vendor NIC? |
+
+---
+
+## 14. Risks
+
+| Risk | Plan |
+|---|---|
+| No hardware timestamps on the instance | software stamps, labelled; still a strong result |
+| AF_XDP zero-copy unsupported | run copy mode and report it |
+| DPDK setup eats too much time | three-day limit, then ship without it |
+| Cloud latency noise | bare metal, median of five runs, full distributions shown |
+| Recovery bugs that only appear under rare timing | seeded loss tests in CI plus a long random-seed soak run |
+| Order-level book slower than Version 1's aggregated book | expected (it tracks every order's position); measured and explained, not hidden |
+
+---
+
+## 15. After Version 2
+
+Production hardening, deliberately outside Stage C:
+
+| Item | Why |
+|---|---|
+| Counters exported once per second (messages, gaps, recoveries, ring depth, latency) | a feed handler must be watched while it runs |
+| Session handling: start and end of day, session change, mid-day restart from a snapshot | real feeds run every day |
+| No exceptions after warmup, checked in CI | predictable latency |
+| Deterministic capture and replay of any session, bit for bit | every incident becomes a reproducible test |
+| Real multicast across hosts (Transit Gateway) and a vendor kernel-bypass NIC | closer to a colocated production setup |
