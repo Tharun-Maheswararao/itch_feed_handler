@@ -1,0 +1,56 @@
+CPU      Apple M4 (10 physical / 10 logical cores)
+OS       Darwin 24.6.0 arm64
+Compiler clang 17.0.0 (clang-1700.0.13.5)
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Wno-gnu-anonymous-struct -mcpu=native [Release]
+Clock    cntvct_el0 @ 1000.000 MHz (1.00 ns per tick, measured resolution 42.00 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    spsc (this repo), capacity 16384 slots
+publish  AAPL on tcp://127.0.0.1:5571 every 100 ms (ZeroMQ PUB, Protobuf)
+warmup 1 done: 2.68 s
+Run 1 [unpaced_on]  latency sampled 1/16  wall 2.966 s   13.32 M file msgs/s   12.82 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 113.8 ns   ring depth at samples p50 16384 p99 16384 max 16384
+  latency         p50        p90        p99       p999        max       mean
+  total       1.21 ms    1.44 ms    3.54 ms    7.08 ms  118.25 ms    1.28 ms
+  queue       1.21 ms    1.44 ms    3.54 ms    7.08 ms  118.25 ms    1.28 ms
+  book         125 ns     167 ns     375 ns     847 ns  408.95 us     114 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+  note: threads not pinned (macOS has no affinity API; QoS USER_INTERACTIVE requested)
+Run 2 [unpaced_on]  latency sampled 1/16  wall 3.176 s   12.44 M file msgs/s   11.98 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 122.5 ns   ring depth at samples p50 16384 p99 16384 max 16384
+  latency         p50        p90        p99       p999        max       mean
+  total       1.21 ms    1.51 ms    4.46 ms   35.65 ms   48.79 ms    1.36 ms
+  queue       1.21 ms    1.51 ms    4.46 ms   35.65 ms   48.79 ms    1.36 ms
+  book         125 ns     211 ns     423 ns     959 ns    6.12 ms     122 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [unpaced_on]  latency sampled 1/16  wall 2.669 s   14.81 M file msgs/s   14.25 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 106.7 ns   ring depth at samples p50 16384 p99 16384 max 16384
+  latency         p50        p90        p99       p999        max       mean
+  total       1.18 ms    1.31 ms    1.77 ms    3.47 ms    3.90 ms    1.14 ms
+  queue       1.18 ms    1.31 ms    1.77 ms    3.47 ms    3.90 ms    1.14 ms
+  book         125 ns     167 ns     335 ns     639 ns   70.00 us     107 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+publisher: 111 snapshots sent, 1 reads skipped as unchanged, 113 reads; last message 146 bytes, mean 147 bytes
+
+median run by throughput: run 1
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/publish/unpaced_on_2/histogram.csv and /Users/tharunmaheswararao/Documents/Cpp/itch_feed_handler/results/publish/unpaced_on_2/run_stats.csv

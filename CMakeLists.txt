@@ -16,6 +16,7 @@ option(FH_BUILD_TESTS "Build unit tests" ON)
 set(FH_SANITIZE "" CACHE STRING "Sanitizers, e.g. address,undefined or thread")
 option(FH_WITH_BOOST "Build the boost::lockfree::spsc_queue baseline if Boost is found" ON)
 option(FH_INJECT_ORDERING_BUG "Deliberate bug: publish the SPSC head with a relaxed store" OFF)
+option(FH_ENABLE_PUBLISH "Build the ZeroMQ + Protobuf snapshot publisher (bench --publish)" OFF)
 
 find_package(Threads REQUIRED)
 
@@ -80,8 +81,42 @@ target_link_libraries(golden_hashes PRIVATE fh_core)
 add_executable(fifo_check tools/fifo_check.cpp)
 target_link_libraries(fifo_check PRIVATE fh_alloc_counter)
 
+# Version 1.1 snapshot publisher. Off by default, so the sanitizer jobs and
+# the benchmarks build exactly as before and need neither library.
+if(FH_ENABLE_PUBLISH)
+  # Protobuf 22+ (Homebrew) needs its own CMake package, which also links
+  # abseil; older releases (Ubuntu 24.04 ships 3.21) only have FindProtobuf.
+  find_package(Protobuf CONFIG QUIET)
+  if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED)
+  endif()
+  find_package(cppzmq CONFIG REQUIRED)
+  message(STATUS "Snapshot publisher: Protobuf ${Protobuf_VERSION}, cppzmq ${cppzmq_VERSION}")
+
+  # protoc called directly: protobuf_generate() places its output differently
+  # in protobuf's own package and in CMake's FindProtobuf.
+  set(FH_PROTO_OUT ${CMAKE_CURRENT_BINARY_DIR}/proto)
+  file(MAKE_DIRECTORY ${FH_PROTO_OUT})
+  add_custom_command(
+    OUTPUT ${FH_PROTO_OUT}/book_snapshot.pb.cc ${FH_PROTO_OUT}/book_snapshot.pb.h
+    COMMAND protobuf::protoc -I ${CMAKE_CURRENT_SOURCE_DIR}/proto --cpp_out=${FH_PROTO_OUT}
+            ${CMAKE_CURRENT_SOURCE_DIR}/proto/book_snapshot.proto
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/proto/book_snapshot.proto protobuf::protoc
+    COMMENT "protoc book_snapshot.proto")
+  add_library(fh_proto STATIC ${FH_PROTO_OUT}/book_snapshot.pb.cc)
+  target_include_directories(fh_proto SYSTEM PUBLIC ${FH_PROTO_OUT})
+  target_link_libraries(fh_proto PUBLIC protobuf::libprotobuf)
+
+  add_library(fh_publish STATIC src/snapshot_publisher.cpp)
+  target_link_libraries(fh_publish PUBLIC fh_core PRIVATE fh_proto cppzmq)
+  target_compile_definitions(fh_publish PUBLIC FH_ENABLE_PUBLISH)
+endif()
+
 add_executable(feed_handler src/main.cpp)
 target_link_libraries(feed_handler PRIVATE fh_core)
+if(FH_ENABLE_PUBLISH)
+  target_link_libraries(feed_handler PRIVATE fh_publish)
+endif()
 
 add_executable(micro_bench bench/micro_bench.cpp)
 target_link_libraries(micro_bench PRIVATE fh_core)
@@ -113,5 +148,10 @@ if(FH_BUILD_TESTS)
     add_executable(test_fifo_alloc tests/test_fifo_alloc.cpp)
     target_link_libraries(test_fifo_alloc PRIVATE fh_alloc_counter GTest::gtest_main)
     gtest_discover_tests(test_fifo_alloc DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600)
+  endif()
+  if(FH_ENABLE_PUBLISH)
+    add_executable(test_snapshot_publisher tests/test_snapshot_publisher.cpp)
+    target_link_libraries(test_snapshot_publisher PRIVATE fh_publish cppzmq GTest::gtest_main)
+    gtest_discover_tests(test_snapshot_publisher DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600)
   endif()
 endif()

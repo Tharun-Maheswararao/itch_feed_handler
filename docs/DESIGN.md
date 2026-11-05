@@ -547,3 +547,84 @@ same Version 1 command ran at 59 ns per message in Stage A on this Mac but
 is re-measured on mains power or the EC2 host. The likely reason a richer
 book is faster: an O(1) window slot replaces Version 1's linear scan into a
 sorted vector, and orders sit in a pool instead of shifting vector elements.
+
+## 16. Version 1.1: publishing the book over the network
+
+The live view already reads the book without slowing it down. The publisher
+is a second reader of the same seqlock snapshot that sends it to other
+processes, over ZeroMQ PUB, serialized with Protobuf
+([`snapshot_publisher.cpp`](../src/snapshot_publisher.cpp),
+[`book_snapshot.proto`](../proto/book_snapshot.proto)).
+
+```
+book thread ──store──> Seqlock<BookSnapshot> ──load──> live view (section 8)
+                                              └─load──> publisher thread ──ZeroMQ PUB──> subscribers
+```
+
+Built only with `-DFH_ENABLE_PUBLISH=ON`; every other build, including the
+three sanitizer jobs and all benchmarks, is unchanged and needs neither
+library.
+
+| Choice | Why |
+|---|---|
+| Own thread, reading the seqlock | the book thread only ever stores into the seqlock and never waits, so nothing on the network side can reach it |
+| PUB socket, send limit 1,000, linger 200 ms | a PUB socket drops past the limit instead of blocking, so a stalled subscriber loses snapshots rather than slowing anyone. Without a linger limit, closing the socket waits forever for a subscriber that stopped reading (ZeroMQ's default) |
+| Skip a snapshot whose levels equal the last one sent, resend once a second | the book thread rewrites the snapshot every 4096 messages *across all stocks*, so its message count changes even when AAPL's book did not. Comparing the count would resend identical books; comparing the levels does not. The once-a-second resend tells subscribers the publisher is alive |
+| `publish_seq` 1, 2, 3, … in every message | a subscriber can see what it missed (the same idea as the sequence numbers Version 2 arbitrates on) |
+| Socket created, used and closed on the publisher thread | ZeroMQ sockets are not thread safe; bind errors are passed back to the constructor through a promise |
+| ZeroMQ and Protobuf only inside the `.cpp` (pimpl) | `main.cpp` and the rest of the code compile without either header |
+| Schema package `fh.wire` | the C++ code already has an `fh::BookSnapshot` (the seqlock payload) |
+| Python subscriber loads the schema at run time | generated `_pb2.py` code only runs with a matching protobuf runtime; a descriptor set compiled by `protoc` works with any 3.20+ runtime |
+
+**What it is not.** This is a monitoring and distribution side channel:
+snapshots of one stock, ten times a second, to dashboards, research tools or
+a risk process. It is not how a trading system moves market data internally.
+There the book is shared through shared memory or multicast with fixed binary
+layouts (SBE, or plain structs), because Protobuf decoding walks variable
+length fields and ZeroMQ over TCP adds on the order of 100 µs. The fast path
+is Version 2's job.
+
+**A seqlock detail the tests found.** A writer that stores back to back,
+with no pause, starves the reader: every read overlaps a write and retries
+(73 successful reads in 300 ms). The book thread stores once per 4096
+messages, tens of microseconds apart, so the reader always gets through. The
+stalled-subscriber test needs no writer at all: it resends one stored book
+on every read.
+
+**Tests** ([`test_snapshot_publisher.cpp`](../tests/test_snapshot_publisher.cpp)):
+
+| Test | What it proves |
+|---|---|
+| Round trip | every field, a full 5x5 book with shares above 2^32, one-sided and empty books; garbage does not parse |
+| Compact | a full 5x5 AAPL snapshot encodes to 153 bytes (the in-memory struct is 296) |
+| Consistent and in order | a TCP subscriber in its own context receives snapshots whose levels all belong to one store, with increasing `publish_seq` |
+| Unchanged book | an idle book is sent once, then once per heartbeat |
+| Stalled subscriber | against a control with no subscriber on the same machine, a subscriber that never reads does not slow the publisher (M4: about 375,000 sends in 300 ms either way; Linux: about 650,000) and `stop()` returns at once; the subscriber holds only about 1,600 of them, so the rest were dropped, not queued |
+| Hash chain unchanged | the two-thread pipeline with verify on gives the identical per-message hash chain with a publisher and subscriber active (snapshot every 64 messages) as without; the subscriber's last snapshot equals the seqlock's final state |
+| Bind error | a bad endpoint throws in the caller's thread |
+
+**Cost to the pipeline** ([`publish_overhead.sh`](../bench/publish_overhead.sh)):
+
+Measured on the M4 laptop, on battery, unpinned, replay to 10:00:00, off
+and on alternated (off, on, on, off), 6 runs each
+([summary](../results/publish/m4/SUMMARY.md)):
+
+| | Publishing off | Publishing on |
+|---|---:|---:|
+| unpaced throughput, median (range) | 13.39 M/s (12.33–14.62) | 13.47 M/s (11.98–14.25) |
+| paced 2 M/s, end-to-end p50 | 0.20 µs | 0.21 µs |
+| paced 2 M/s, end-to-end p99, range over runs | 28–361 ms | 25–310 ms |
+| snapshots sent / missed by the subscriber | | ~730 per paced invocation / 0 |
+| message size | | 145–148 bytes |
+| publisher send to subscriber receive, median | | 136–148 µs (Python, same machine) |
+
+Throughput and median latency show no cost. The p99 row shows what an
+unpinned laptop cannot do: with publishing *off* the p99 already moves by
+more than 10x between runs (macOS schedules the threads where it likes, and
+the battery limits the clock), so a difference caused by the publisher
+would be invisible here. The pinned answer comes from the EC2 workflow
+(`mode=publish`, which runs the same script with pinned cores). The
+expected result, from the design: the book thread does the same work either
+way (it writes the snapshot whether or not someone reads it), and the only
+added traffic is the publisher reading ten 296-byte snapshots a second,
+against cache lines the book thread writes once per 4096 messages.

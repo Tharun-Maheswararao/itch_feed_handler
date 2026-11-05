@@ -16,10 +16,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "benchmark = Stage A run + PR; matrix = Stage B queue matrix + PR; diagnose = overhead experiments (artifact only)"
+        description: "benchmark = Stage A run + PR; matrix = Stage B queue matrix + PR; diagnose = overhead experiments (artifact only); publish = v1.1 publisher on/off (artifact only)"
         type: choice
         default: benchmark
-        options: [benchmark, matrix, diagnose]
+        options: [benchmark, matrix, diagnose, publish]
       instance_type:
         description: EC2 instance type (needs >= 16 GB RAM so the day fits in page cache)
         type: choice
@@ -122,6 +122,10 @@ jobs:
           $SUDO apt-get update -q
           $SUDO apt-get install -y -q build-essential cmake curl libboost-dev \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
+          if [ "${{ inputs.mode }}" = publish ]; then
+            $SUDO apt-get install -y -q protobuf-compiler libprotobuf-dev libzmq3-dev cppzmq-dev \
+              python3-zmq python3-protobuf
+          fi
           if [ "${{ inputs.mode }}" = diagnose ] || [ "${{ contains(inputs.instance_type, 'metal') }}" = true ]; then
             # perf for hardware counters; best effort (package names vary by kernel)
             $SUDO apt-get install -y -q linux-tools-common "linux-tools-$(uname -r)" \
@@ -216,6 +220,22 @@ jobs:
         run: |
           bench/diagnose.sh data/12302019.NASDAQ_ITCH50
           cat results/diagnose/DIAGNOSE.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publisher overhead, off vs on (pinned)
+        if: ${{ inputs.mode == 'publish' }}
+        env:
+          RATE: ${{ inputs.rate }}
+          RESULTS: results/publish/${{ inputs.instance_type }}
+        run: |
+          bench/publish_overhead.sh data/12302019.NASDAQ_ITCH50
+          cat "$RESULTS/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.mode == 'publish' }}
+        with:
+          name: linux-publish-${{ github.run_id }}
+          path: results/publish
+          retention-days: 30
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ inputs.mode == 'diagnose' }}

@@ -10,6 +10,9 @@
 //                            [--queue spsc|spsc_unaligned|mutex|rigtorp|boost] [--capacity 1024|16384|65536|1048576]
 //                            [--placement LABEL]  recorded in the CSV (e.g. same-core, cross-core)
 //                            [--view SYMBOL [--view-interval-ms 1000] [--record FILE] [--no-draw]]
+//                            [--publish tcp://*:5556 [--publish-symbol AAPL] [--publish-interval-ms 100]]
+//                                                 needs a -DFH_ENABLE_PUBLISH=ON build; the symbol
+//                                                 defaults to --view's, else AAPL
 //   feed_handler single FILE [--book fast|golden] [--cpu N] [--timed] [--until T]
 //   feed_handler gen    OUT  [--events N] [--seed S] [--stocks K]
 //   feed_handler queues      (lists the queue types built into this binary)
@@ -32,6 +35,9 @@
 #include "fh/stats/report.hpp"
 #include "fh/testing/itch_writer.hpp"
 #include "fh/view/live_view.hpp"
+#ifdef FH_ENABLE_PUBLISH
+#include "fh/pub/snapshot_publisher.hpp"
+#endif
 
 using namespace fh;
 
@@ -307,12 +313,30 @@ int bench_with(const Args& a, Book* /*tag*/) {
     const std::string label = a.get("label", a.get("book", "fast"));
     const std::size_t cap = std::size_t{1} << static_cast<int>(a.num("order-capacity-log2", 23));
 
+    // The live view and the publisher read the same snapshot, so either one
+    // turns it on, and they must agree on the symbol.
     Seqlock<BookSnapshot> snapshot;
     const bool view = a.has("view");
-    if (view) {
+    const bool publish = a.has("publish");
+    if (view && publish && a.has("publish-symbol") && a.get("publish-symbol") != a.get("view"))
+        throw std::runtime_error("--view and --publish-symbol must name the same stock (they share one snapshot)");
+    if (view || publish) {
         opt.snapshot = &snapshot;
-        opt.view_symbol = a.get("view");
+        opt.view_symbol = view ? a.get("view") : a.get("publish-symbol", "AAPL");
     }
+#ifdef FH_ENABLE_PUBLISH
+    std::unique_ptr<SnapshotPublisher> publisher;
+    if (publish) {
+        PublisherConfig pc;
+        if (a.get("publish") != "1") pc.endpoint = a.get("publish");  // bare --publish: the default
+        pc.interval = std::chrono::milliseconds(static_cast<int>(a.num("publish-interval-ms", 100)));
+        publisher = std::make_unique<SnapshotPublisher>(snapshot, pc);
+        std::printf("publish  %s on %s every %lld ms (ZeroMQ PUB, Protobuf)\n", opt.view_symbol.c_str(),
+                    publisher->endpoint().c_str(), static_cast<long long>(pc.interval.count()));
+    }
+#else
+    if (publish) throw std::runtime_error("--publish needs a build with -DFH_ENABLE_PUBLISH=ON");
+#endif
 
     auto make_book = [&] {
         if constexpr (std::is_constructible_v<Book, std::size_t>)
@@ -352,6 +376,17 @@ int bench_with(const Args& a, Book* /*tag*/) {
         }
         records.push_back(std::move(rec));
     }
+#ifdef FH_ENABLE_PUBLISH
+    if (publisher) {
+        publisher->stop();
+        const PublisherStats ps = publisher->stats();
+        std::printf("\npublisher: %llu snapshots sent, %llu reads skipped as unchanged, %llu reads; "
+                    "last message %llu bytes, mean %.0f bytes\n",
+                    (unsigned long long)ps.published, (unsigned long long)ps.unchanged, (unsigned long long)ps.polls,
+                    (unsigned long long)ps.last_bytes,
+                    ps.published ? static_cast<double>(ps.bytes) / static_cast<double>(ps.published) : 0.0);
+    }
+#endif
     const std::size_t med = median_run(records);
     std::printf("\nmedian run by %s: run %d\n", records[med].result.paced ? "p99 latency" : "throughput",
                 records[med].run);

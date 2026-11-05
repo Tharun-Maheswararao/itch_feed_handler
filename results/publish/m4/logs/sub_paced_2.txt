@@ -1,0 +1,2 @@
+subscribed to AAPL on tcp://127.0.0.1:5571
+received 728 snapshots, missed 0 (sequence gaps after the first), 148 bytes mean; send->receive median 144 us, p99 11965 us

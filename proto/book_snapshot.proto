@@ -1,0 +1,24 @@
+// Book snapshot sent by `feed_handler bench --publish` (Version 1.1).
+// One ZeroMQ message per snapshot: frame 1 is the symbol (the topic
+// subscribers filter on), frame 2 is this message.
+syntax = "proto3";
+
+// Not plain "fh": the C++ code already has an fh::BookSnapshot (the seqlock
+// payload), so the generated class lives in fh::wire.
+package fh.wire;
+
+message Level {
+  uint32 price  = 1;  // ITCH price units: 1/10000 dollar
+  uint64 shares = 2;  // total shares resting at the level
+  uint32 orders = 3;  // number of orders at the level
+}
+
+message BookSnapshot {
+  string symbol         = 1;
+  uint64 itch_time_ns   = 2;  // ITCH timestamp of the last applied message, ns since midnight
+  uint64 book_messages  = 3;  // book messages applied when the snapshot was taken
+  uint64 publish_seq    = 4;  // 1, 2, 3, ... per publisher: a jump means the subscriber missed snapshots
+  int64  send_time_ns   = 5;  // publisher wall clock when sent, Unix ns
+  repeated Level bids   = 6;  // best first, at most 5
+  repeated Level asks   = 7;  // best first, at most 5
+}

@@ -323,6 +323,63 @@ in `mode=matrix`. Each cell writes a `run_stats.csv` with `queue`,
 [`plot_matrix.py`](scripts/plot_matrix.py) rebuild the table and the five
 charts from them.
 
+## Version 1.1: publishing the book over the network
+
+The book thread already writes a seqlock snapshot that the live view reads
+without slowing it down. Version 1.1 adds a second reader that sends the
+same snapshot to other processes, over **ZeroMQ PUB**, serialized with
+**Protobuf** ([schema](proto/book_snapshot.proto),
+[DESIGN.md section 16](docs/DESIGN.md#16-version-11-publishing-the-book-over-the-network)).
+
+```
+book thread ──store──> seqlock snapshot ──load──> live view
+                                         └─load──> publisher thread ──ZeroMQ PUB──> subscribers
+```
+
+```bash
+brew install protobuf zeromq cppzmq      # Ubuntu: protobuf-compiler libprotobuf-dev libzmq3-dev cppzmq-dev
+python3 -m pip install pyzmq protobuf
+cmake -S . -B build-pub -DCMAKE_BUILD_TYPE=Release -DFH_ENABLE_PUBLISH=ON && cmake --build build-pub -j
+```
+
+```bash
+python3 scripts/sub_snapshots.py AAPL      # terminal 1: waits for the publisher
+```
+
+```bash
+./build-pub/feed_handler bench data/12302019.NASDAQ_ITCH50 --runs 1 --warmup 0 \
+  --speedup 1 --pace-from 09:30:00 --until 09:31:00 --publish 'tcp://*:5556'      # terminal 2
+```
+
+```
+#3      AAPL   09:30:00.033  bid   289.5300 x 686     | ask   289.7400 x 200      book msgs   5,402,624      341 us
+#4      AAPL   09:30:00.158  bid   289.5300 x 686     | ask   289.7400 x 300      book msgs   5,468,160      184 us
+#5      AAPL   09:30:00.261  bid   289.5300 x 706     | ask   289.7400 x 521      book msgs   5,517,312      236 us
+...
+received 59 snapshots, missed 0 (sequence gaps after the first), 145 bytes mean; send->receive median 146 us, p99 3668 us
+```
+
+* the network can never slow the book: the publisher has its own thread, and
+  a PUB socket drops snapshots for a subscriber that falls behind instead of
+  blocking (tested with a subscriber that never reads)
+* an unchanged book is not resent, except once a second as a heartbeat;
+  every message carries a sequence number so subscribers see what they missed
+* a full five-level snapshot is about 145 bytes
+* publishing does not change what the book computes: the per-message hash
+  chain is identical with a publisher and subscriber active
+
+Cost to the pipeline, publishing off vs on, alternated, 6 runs each, on this
+laptop ([details](results/publish/m4/SUMMARY.md)): unpaced throughput
+13.39 vs 13.47 M msgs/s, paced p50 0.20 vs 0.21 µs, no snapshots missed.
+The laptop's p99 varies over 10x between runs even with publishing off
+(unpinned, battery), so the pinned p99 comparison is run on EC2
+(`Linux benchmark` workflow, `mode=publish`).
+
+This is a monitoring and distribution side channel (dashboards, research, a
+risk process), not a trading fast path: there market data moves through
+shared memory or multicast with fixed binary layouts. That fast path is
+Version 2.
+
 ## Version 2 (planned): Stage C
 
 Version 1 is a replay tool: it reads a file, measures parse-to-book latency
@@ -356,6 +413,7 @@ flowchart LR
     end
     B --> O["Books for 8,906 stocks<br/>latency histograms<br/>message counts"]
     B -. "seqlock snapshot<br/>every 4096 msgs" .-> V["Thread 3 (optional)<br/>live terminal view"]
+    B -. "same snapshot" .-> PUB["Thread 4 (optional, v1.1)<br/>ZeroMQ PUB + Protobuf"]
 ```
 
 | Component | Implementation | File |
@@ -367,6 +425,7 @@ flowchart LR
 | Fast book | open-addressing order map (Fibonacci hash, backward-shift delete) + sorted level vectors, touch at the back | [`fast_book.hpp`](include/fh/book/fast_book.hpp), [`order_map.hpp`](include/fh/book/order_map.hpp) |
 | Latency | `rdtsc` / `cntvct_el0` / `steady_clock`, log-linear fixed-array histogram, no allocation | [`clock.hpp`](include/fh/stats/clock.hpp), [`histogram.hpp`](include/fh/stats/histogram.hpp) |
 | Live view | seqlock snapshot, own thread, ANSI redraw once per second | [`seqlock.hpp`](include/fh/view/seqlock.hpp), [`live_view.cpp`](src/live_view.cpp) |
+| Publisher (v1.1) | second seqlock reader, ZeroMQ PUB, Protobuf, drop-not-block, built with `-DFH_ENABLE_PUBLISH=ON` | [`snapshot_publisher.cpp`](src/snapshot_publisher.cpp), [`sub_snapshots.py`](scripts/sub_snapshots.py) |
 
 Every design choice, and what I would change next, is in **[docs/DESIGN.md](docs/DESIGN.md)**.
 
@@ -398,6 +457,8 @@ curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20
 | `feed_handler bench … --sample-every 16` | time a random 1-in-16 sample of messages (the benchmark default); `1` times every message |
 | `feed_handler bench … --ring-batch 32 --no-latency` | ring index batching; throughput-only run without per-message timing |
 | `bench/diagnose.sh FILE` | pipeline-overhead experiments (batching, SMT siblings, timing on/off, `perf stat`) |
+| `feed_handler bench … --publish 'tcp://*:5556' [--publish-symbol AAPL]` | publish the book over ZeroMQ (needs `-DFH_ENABLE_PUBLISH=ON`); `scripts/sub_snapshots.py` subscribes |
+| `bench/publish_overhead.sh FILE` | throughput and p99 with publishing off and on |
 | `feed_handler gen OUT --events N` | synthetic ITCH feed (used by CI) |
 | `micro_bench FILE` | parse-only, golden vs fast book, raw SPSC transfer |
 
@@ -422,6 +483,7 @@ existing CSVs, run `python3 scripts/plot_results.py`.
 | [`test_golden_compare`](tests/test_golden_compare.cpp) | fast book equals golden after every message; the two-thread pipeline (fast and golden books, paced and unpaced, view on) produces the identical per-message hash chain |
 | Invariants | each level's shares and order count equal the sum of its orders, levels are strictly sorted, no order is in two places |
 | [`test_histogram`](tests/test_histogram.cpp), [`test_seqlock`](tests/test_seqlock.cpp) | bucket math and error bound; no torn snapshot across 3M concurrent writes |
+| [`test_snapshot_publisher`](tests/test_snapshot_publisher.cpp) | (v1.1, publisher builds only) Protobuf round trip; a TCP subscriber gets consistent, ordered snapshots; unchanged books are not resent; a stalled subscriber never blocks the publisher; the pipeline's hash chain is identical with publishing on |
 | [`test_queue_stress`](tests/test_queue_stress.cpp) | the same 8 stress tests for all five queues (Stage B): exact +1 sequence, random-delay interleavings, 4-slot wraparound, payload integrity, full/empty, book hash vs golden at every checkpoint |
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every
@@ -429,7 +491,9 @@ push. It builds with gcc and clang on Linux and clang on macOS, in Release and
 Debug, and runs AddressSanitizer, UndefinedBehaviorSanitizer and
 ThreadSanitizer as three separate builds. A fourth job builds the deliberate
 ordering bug and passes only if ThreadSanitizer reports it. An end-to-end job generates a
-synthetic feed and runs count → golden → verify → bench → charts.
+synthetic feed and runs count → golden → verify → bench → charts. A publisher
+job builds with ZeroMQ and Protobuf, runs their tests, and checks that a
+Python subscriber receives the book over TCP.
 
 ## Repository layout
 
@@ -439,12 +503,13 @@ include/fh/queue/    SPSC ring (+ unpadded variant), mutex queue, Rigtorp/Boost 
 include/fh/book/     golden book, fast book, order map, hashing, comparison
 include/fh/stats/    clock, histogram, report/CSV
 include/fh/view/     seqlock, snapshot, live view
+include/fh/pub/      snapshot publisher (v1.1, ZeroMQ + Protobuf); schema in proto/
 include/fh/testing/  ITCH encoder + synthetic feed generator
 include/fh/pipeline.hpp   two-thread pipeline and single-thread reference run
 src/                 CLI, report, sysinfo, live view
 tests/               GoogleTest suites
 bench/               micro-benchmarks, one-command benchmark script
-scripts/             plot_results.py (charts), make_gif.py (README GIF), summarize_results.py
+scripts/             plot_results.py (charts), make_gif.py (README GIF), summarize_results.py, sub_snapshots.py
 bench/aws/           one-time AWS setup for the EC2 benchmark workflow
 bench/run_matrix.sh  Stage B queue matrix; bench/queue_stress.cpp long-run stress tool
 third_party/rigtorp/ vendored SPSCQueue.h (MIT), with VERSION

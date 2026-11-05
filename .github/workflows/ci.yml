@@ -125,3 +125,35 @@ jobs:
           path: |
             ci-results
             ci-charts
+
+  # Version 1.1 snapshot publisher (ZeroMQ + Protobuf). Its own job: the
+  # option is off everywhere else, so the sanitizer builds never see ZeroMQ
+  # (its internal threads are not built for ThreadSanitizer).
+  publish:
+    name: snapshot publisher (ZeroMQ + Protobuf)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q protobuf-compiler libprotobuf-dev libzmq3-dev cppzmq-dev
+          pip install pyzmq protobuf
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_WITH_BOOST=OFF -DFH_ENABLE_PUBLISH=ON
+          cmake --build build -j4 --target feed_handler test_snapshot_publisher
+      - name: Publisher tests
+        run: ./build/test_snapshot_publisher
+      - name: Feed handler to Python subscriber over TCP
+        run: |
+          ./build/feed_handler gen synthetic.itch --events 2000000 --seed 7 --stocks 32
+          python3 scripts/sub_snapshots.py SYM1 --endpoint tcp://127.0.0.1:5556 --timeout 5 > sub.txt &
+          sleep 1
+          ./build/feed_handler bench synthetic.itch --runs 1 --warmup 0 --rate 500000 \
+            --publish tcp://127.0.0.1:5556 --publish-symbol SYM1 --out ci-publish | grep -E "^publish"
+          wait
+          head -3 sub.txt; tail -1 sub.txt
+          grep -q "^received [1-9]" sub.txt
