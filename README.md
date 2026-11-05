@@ -388,7 +388,9 @@ a real network path:
 
 * **C0 ✅ done:** order-level FIFO book (queue position at every level) with
   price-indexed levels near the touch. On the full day it reproduces the
-  golden hash file at every checkpoint with **zero heap allocations**
+  golden hash file at every checkpoint with **zero heap allocations**.
+  Keeping queue position costs about 20% against Version 1's aggregated
+  book (66.8 vs 55.4 ns per message, single thread)
   ([DESIGN.md section 15](docs/DESIGN.md#15-stage-c0-the-order-level-book))
 * **C1** MoldUDP64 replay publisher with seeded loss injection
 * **C2** kernel `recvmmsg` receiver with A/B line arbitration and wire-to-book

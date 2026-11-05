@@ -539,14 +539,33 @@ at the tail, so it loses its place even at the same price and size.
   message. Clean under AddressSanitizer and UBSan.
 
 **Speed.** On a slice that fits in RAM (04:00 to about 09:50, 63 M book
-messages), single-threaded parse + book, best of two: the order-level book is
-**17% faster** than Version 1's aggregated book (179.6 against 216.9 ns per
-message, measured back to back). The absolute numbers are inflated: the
-same Version 1 command ran at 59 ns per message in Stage A on this Mac but
-224 ns that day, on battery power, so only the ratio is meaningful until it
-is re-measured on mains power or the EC2 host. The likely reason a richer
-book is faster: an O(1) window slot replaces Version 1's linear scan into a
-sorted vector, and orders sit in a pool instead of shifting vector elements.
+messages), single-threaded parse + book, on mains power: the order-level
+book is **about 20% slower** than Version 1's aggregated book. Best of seven
+rounds, 66.8 against 55.4 ns per message; rounds 4 to 7 all fell between
++17% and +23% ([log](../results/v2/c0_speed_m4.txt)). The Version 1 number
+matches Stage A's 59 ns on this Mac, so the machine was at full speed.
+
+That is the cost of keeping queue position. Version 1's order map slot holds
+the order itself (price, shares, side), so one lookup reaches everything a
+cancel or execution needs, and the level is usually at the back of a short
+sorted vector already in cache. Here the map slot holds a handle, and a
+message follows a chain of dependent loads: map slot, then the order node,
+then its level node, and on a removal from the middle of a queue, the two
+neighbouring order nodes whose links change. Three to five cache lines that
+each wait for the one before, against about one.
+
+**A measurement that was wrong.** The first measurement, on battery, showed
+the order-level book *17% faster* (179.6 against 216.9 ns). On battery
+macOS moves work to the efficiency cores, and the two books, run one after
+the other, did not get the same cores; every absolute number was 3 to 4
+times too slow, and so was the ratio's sign. Re-measured on mains power
+before anything was built on it. Rule kept since: no speed claim from this
+laptop on battery, and the baseline (Version 1's 59 ns) is checked first.
+
+Where the 20% could come back, if C2's wire-to-book budget needs it: store
+price, shares and side in the map slot as Version 1 does (one load for
+executions and cancels at the head), and prefetch the order node when the
+message is parsed, a stage before the book needs it.
 
 ## 16. Version 1.1: publishing the book over the network
 

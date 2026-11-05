@@ -1,0 +1,31 @@
+# Stage C0 speed on Apple M4, mains power (AC), Low Power Mode off, 2026-11-05
+# Slice: first 2,000,000,000 bytes of 12302019.NASDAQ_ITCH50 (04:00 to about 09:50)
+# build/: Release, -mcpu=native. Each fifo_check line is best of 2 replays per book.
+# 'single' is Version 1's existing command (Stage A: 59 ns on this Mac).
+=== round 1 Now drawing from 'AC Power'
+single [fast] 62963950 book msgs (64539695 total) in 3.672 s = 58.3 ns per book msg, pinned no
+speed (parse + book, single thread, best of 2, 62963950 book msgs):
+  Version 1 FastBook (aggregated)   3.74 s  59.5 ns/book msg
+  Version 2 FifoBook (order level)  4.21 s  66.8 ns/book msg  (+12%)
+=== round 2 Now drawing from 'AC Power'
+single [fast] 62963950 book msgs (64539695 total) in 4.813 s = 76.4 ns per book msg, pinned no
+speed (parse + book, single thread, best of 2, 62963950 book msgs):
+  Version 1 FastBook (aggregated)   3.97 s  63.1 ns/book msg
+  Version 2 FifoBook (order level)  5.33 s  84.7 ns/book msg  (+34%)
+=== round 3 Now drawing from 'AC Power'
+single [fast] 62963950 book msgs (64539695 total) in 4.401 s = 69.9 ns per book msg, pinned no
+speed (parse + book, single thread, best of 2, 62963950 book msgs):
+  Version 1 FastBook (aggregated)   3.71 s  58.9 ns/book msg
+  Version 2 FifoBook (order level)  4.59 s  72.9 ns/book msg  (+24%)
+=== round 4 Now drawing from 'AC Power'
+  Version 1 FastBook (aggregated)   3.49 s  55.4 ns/book msg
+  Version 2 FifoBook (order level)  4.28 s  68.0 ns/book msg  (+23%)
+=== round 5 Now drawing from 'AC Power'
+  Version 1 FastBook (aggregated)   3.67 s  58.3 ns/book msg
+  Version 2 FifoBook (order level)  4.30 s  68.3 ns/book msg  (+17%)
+=== round 6 Now drawing from 'AC Power'
+  Version 1 FastBook (aggregated)   3.53 s  56.1 ns/book msg
+  Version 2 FifoBook (order level)  4.26 s  67.7 ns/book msg  (+21%)
+=== round 7 Now drawing from 'AC Power'
+  Version 1 FastBook (aggregated)   3.55 s  56.4 ns/book msg
+  Version 2 FifoBook (order level)  4.29 s  68.1 ns/book msg  (+21%)
