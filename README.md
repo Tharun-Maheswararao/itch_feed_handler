@@ -368,12 +368,20 @@ received 59 snapshots, missed 0 (sequence gaps after the first), 145 bytes mean;
 * publishing does not change what the book computes: the per-message hash
   chain is identical with a publisher and subscriber active
 
-Cost to the pipeline, publishing off vs on, alternated, 6 runs each, on this
-laptop ([details](results/publish/m4/SUMMARY.md)): unpaced throughput
-13.39 vs 13.47 M msgs/s, paced p50 0.20 vs 0.21 µs, no snapshots missed.
-The laptop's p99 varies over 10x between runs even with publishing off
-(unpinned, battery), so the pinned p99 comparison is run on EC2
-(`Linux benchmark` workflow, `mode=publish`).
+Cost to the pipeline, pinned on a `c7i.2xlarge`, publishing off vs on,
+alternated, 6 runs each ([summary](results/publish/c7i.2xlarge/SUMMARY.md)):
+
+| | Off | On |
+|---|---:|---:|
+| unpaced throughput | 8.12 M msgs/s | 8.06 M msgs/s (inside the run-to-run spread) |
+| paced 2 M/s, p50 | 0.45 µs | 0.45 µs |
+| paced 2 M/s, p99 | 3.04 µs | 3.25 µs (+0.2 µs) |
+| snapshots missed by the subscriber | | 0 of 761 |
+
+Free in throughput and at the median; about 0.2 µs at p99, most likely the
+two extra unpinned threads (publisher and subscriber) landing on the book
+core's hyperthread sibling on this 4-core host
+([analysis](docs/DESIGN.md#16-version-11-publishing-the-book-over-the-network)).
 
 This is a monitoring and distribution side channel (dashboards, research, a
 risk process), not a trading fast path: there market data moves through

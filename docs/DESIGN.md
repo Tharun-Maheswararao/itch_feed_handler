@@ -624,26 +624,46 @@ on every read.
 
 **Cost to the pipeline** ([`publish_overhead.sh`](../bench/publish_overhead.sh)):
 
-Measured on the M4 laptop, on battery, unpinned, replay to 10:00:00, off
-and on alternated (off, on, on, off), 6 runs each
-([summary](../results/publish/m4/SUMMARY.md)):
+Pinned, on a `c7i.2xlarge` (Xeon Platinum 8488C, 4 cores / 8 threads,
+gcc 13), parser on CPU 1 and book on CPU 2, replay to 10:00:00, off and on
+alternated (off, on, on, off), 6 runs each, a Python subscriber connected in
+every "on" run ([summary](../results/publish/c7i.2xlarge/SUMMARY.md),
+[workflow run](https://github.com/Tharun-Maheswararao/itch_feed_handler/actions/runs/42064908537)):
 
-| | Publishing off | Publishing on |
-|---|---:|---:|
-| unpaced throughput, median (range) | 13.39 M/s (12.33–14.62) | 13.47 M/s (11.98–14.25) |
-| paced 2 M/s, end-to-end p50 | 0.20 µs | 0.21 µs |
-| paced 2 M/s, end-to-end p99, range over runs | 28–361 ms | 25–310 ms |
-| snapshots sent / missed by the subscriber | | ~730 per paced invocation / 0 |
-| message size | | 145–148 bytes |
-| publisher send to subscriber receive, median | | 136–148 µs (Python, same machine) |
+| | Publishing off | Publishing on | Difference |
+|---|---:|---:|---:|
+| unpaced throughput, median (range) | 8.12 M/s (7.98–8.20) | 8.06 M/s (7.95–8.13) | −0.7%, inside the spread |
+| paced 2 M/s, end-to-end p50 | 0.45 µs | 0.45 µs | none |
+| paced 2 M/s, end-to-end p99, median (range) | 3.04 µs (3.0–3.2) | 3.25 µs (3.1–3.4) | **+0.2 µs (+7%)** |
+| paced 2 M/s, end-to-end p99.9 | 8.75 µs | 9.07 µs | +0.3 µs |
+| snapshots received / missed | | 761 per paced invocation / 0 | |
+| message size | | 148 bytes | |
+| publisher send to subscriber receive, median | | 424–614 µs (Python) | |
 
-Throughput and median latency show no cost. The p99 row shows what an
-unpinned laptop cannot do: with publishing *off* the p99 already moves by
-more than 10x between runs (macOS schedules the threads where it likes, and
-the battery limits the clock), so a difference caused by the publisher
-would be invisible here. The pinned answer comes from the EC2 workflow
-(`mode=publish`, which runs the same script with pinned cores). The
-expected result, from the design: the book thread does the same work either
-way (it writes the snapshot whether or not someone reads it), and the only
-added traffic is the publisher reading ten 296-byte snapshots a second,
-against cache lines the book thread writes once per 4096 messages.
+So publishing is free in throughput and at the median, and costs about
+0.2 µs at p99: small, but in five of six runs above every "off" run, so it is
+real, not noise. Two things change when publishing is on, and this run
+cannot separate them:
+
+1. **The book thread writes the snapshot** (top five levels per side, a
+   296-byte seqlock store) every 4096 messages. With publishing off it does
+   not write it at all. That is one write every 2 ms at this rate, too rare
+   on its own to move the 99th percentile (1% of messages), unless one write
+   delays several messages behind it.
+2. **Two more threads run on a 4-core machine**: the publisher and the
+   Python subscriber, unpinned. With the pipeline on cores 1 and 2, the
+   scheduler can put either one on a hyperthread sibling of the book
+   thread's core (CPUs 5 and 6), where it competes for the same execution
+   units and L1/L2 caches. This is the more likely cause.
+
+The experiment that separates them, if it matters: the same run with
+`--view AAPL --no-draw` (snapshot written, no publisher) and with the
+publisher pinned to core 3. For a production setup the rule is the same as
+for any helper thread: give it its own physical core, away from the hot
+path's siblings.
+
+On the M4 laptop (unpinned, on battery,
+[summary](../results/publish/m4/SUMMARY.md)) throughput and p50 also showed
+no cost, but p99 varied by more than 10x between runs with publishing off,
+so the laptop could not resolve a 0.2 µs effect at all. The pinned host was
+needed for this answer.

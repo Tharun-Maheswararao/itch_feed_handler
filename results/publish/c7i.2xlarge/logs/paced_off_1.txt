@@ -1,0 +1,52 @@
+CPU      Intel(R) Xeon(R) Platinum 8488C (4 physical / 8 logical cores)
+OS       Linux 7.0.0-1014-aws x86_64
+Compiler gcc 13.3.0
+Flags    -O3 -DNDEBUG -Wall -Wextra -Wpedantic -march=native [Release]
+Clock    rdtsc @ 2399.990 MHz (0.42 ns per tick, measured resolution 13.33 ns)
+file     data/12302019.NASDAQ_ITCH50 (8.25 GB)
+stream cut at 10:00:00: 1.24 of 8.25 GB
+queue    spsc (this repo), capacity 16384 slots
+warmup 1 done: 19.02 s
+Run 1 [paced_off]  latency sampled 1/16  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 153.4 ns   ring depth at samples p50 0 p99 5 max 1933
+  latency         p50        p90        p99       p999        max       mean
+  total        453 ns     653 ns    3.04 us    8.53 us    1.27 ms     606 ns
+  queue        353 ns     393 ns    2.77 us    8.32 us    1.27 ms     452 ns
+  book         143 ns     293 ns     506 ns     773 ns   17.73 us     153 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 2 [paced_off]  latency sampled 1/16  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 151.1 ns   ring depth at samples p50 0 p99 5 max 2102
+  latency         p50        p90        p99       p999        max       mean
+  total        453 ns     640 ns    3.04 us    8.75 us    1.23 ms     597 ns
+  queue        353 ns     393 ns    2.72 us    8.53 us    1.23 ms     446 ns
+  book         143 ns     286 ns     493 ns     760 ns   19.42 us     151 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+Run 3 [paced_off]  latency sampled 1/16  wall 19.017 s   2.08 M file msgs/s   2.00 M book msgs/s
+  book msgs 38033272   timed 2381738   mean book update 152.3 ns   ring depth at samples p50 0 p99 5 max 2068
+  latency         p50        p90        p99       p999        max       mean
+  total        453 ns     640 ns    2.99 us    8.53 us    1.24 ms     595 ns
+  queue        353 ns     393 ns    2.72 us    8.32 us    1.24 ms     442 ns
+  book         143 ns     286 ns     506 ns     760 ns   14.31 us     152 ns
+  book: adds 17501224  exec 670785  cancel 893193  delete 15344495  replace 3614669  live 1663112  peak 1716981  unknown_ref 0  overfill 0
+
+median run by p99 latency: run 1
+Message mix (39513963 messages, 1.24 GB)
+  A      16548052   41.88%
+  D      15344495   38.83%
+  U       3614669    9.15%
+  I       1074775    2.72%
+  F        953172    2.41%
+  X        893193    2.26%
+  E        657678    1.66%
+  L        215091    0.54%
+  P        164068    0.42%
+  C         13107    0.03%
+  Y          8932    0.02%
+  H          8909    0.02%
+  R          8906    0.02%
+  Q          8906    0.02%
+  S             3    0.00%
+  K             3    0.00%
+  J             3    0.00%
+  V             1    0.00%
+wrote results/publish/c7i.2xlarge/paced_off_1/histogram.csv and results/publish/c7i.2xlarge/paced_off_1/run_stats.csv
