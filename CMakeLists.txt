@@ -73,13 +73,17 @@ target_link_libraries(fh_core PUBLIC Threads::Threads)
 
 # Replaces global operator new/delete with counting versions (Version 2's
 # zero-allocation proof). Linked only into tests and tools that check it.
-add_library(fh_alloc_counter STATIC src/alloc_counter.cpp)
-target_link_libraries(fh_alloc_counter PUBLIC fh_core)
+# Not in sanitizer builds: their runtimes define operator new themselves
+# (ThreadSanitizer's as a strong symbol, so linking both fails).
+if(NOT FH_SANITIZE)
+  add_library(fh_alloc_counter STATIC src/alloc_counter.cpp)
+  target_link_libraries(fh_alloc_counter PUBLIC fh_core)
+  add_executable(fifo_check tools/fifo_check.cpp)
+  target_link_libraries(fifo_check PRIVATE fh_alloc_counter)
+endif()
 
 add_executable(golden_hashes tools/golden_hashes.cpp)
 target_link_libraries(golden_hashes PRIVATE fh_core)
-add_executable(fifo_check tools/fifo_check.cpp)
-target_link_libraries(fifo_check PRIVATE fh_alloc_counter)
 
 # Version 1.1 snapshot publisher. Off by default, so the sanitizer jobs and
 # the benchmarks build exactly as before and need neither library.
