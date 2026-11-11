@@ -80,6 +80,9 @@ if(NOT FH_SANITIZE)
   target_link_libraries(fh_alloc_counter PUBLIC fh_core)
   add_executable(fifo_check tools/fifo_check.cpp)
   target_link_libraries(fifo_check PRIVATE fh_alloc_counter)
+  # PerfGuard measurement core: per-message latency + allocation gate.
+  add_executable(perfguard tools/perfguard.cpp)
+  target_link_libraries(perfguard PRIVATE fh_alloc_counter)
 endif()
 
 add_executable(golden_hashes tools/golden_hashes.cpp)
