@@ -66,6 +66,9 @@ public:
 
     void add(uint64_t ref, uint16_t locate, Side side, uint32_t price, uint32_t shares) {
         ++ctr_.adds;
+#if defined(FH_INJECT_HOT_ALLOC)
+        inject_log_.push_back(ref);  // deliberate: grows with no reserve, so it reallocates mid-replay
+#endif
         bool inserted;
         uint32_t* slot = map_.insert(ref, inserted);
         if (!slot) {
@@ -626,6 +629,9 @@ private:
     FifoCounters fifo_;
     uint64_t hash_ = 0;
     uint64_t rng_ = 0x2545F4914F6CDD1Dull;
+#if defined(FH_INJECT_HOT_ALLOC)
+    std::vector<uint64_t> inject_log_;  // perfguard's must-fail CI check (CMake FH_INJECT_HOT_ALLOC)
+#endif
 };
 
 }  // namespace fh

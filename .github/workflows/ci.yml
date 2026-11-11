@@ -84,6 +84,33 @@ jobs:
             echo "::error::ThreadSanitizer did not report the injected bug"; exit 1
           fi
 
+  # A gate nobody has seen fail proves nothing. FH_INJECT_HOT_ALLOC makes
+  # FifoBook::add grow a std::vector with no reserve; this job passes only if
+  # perfguard fails the run for allocating after warmup.
+  deliberate-alloc:
+    name: deliberate hot-path allocation is caught by perfguard
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with FH_INJECT_HOT_ALLOC
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_BUILD_TESTS=OFF \
+            -DFH_WITH_BOOST=OFF -DFH_INJECT_HOT_ALLOC=ON
+          cmake --build build -j4 --target feed_handler perfguard
+      - name: Expect perfguard to fail on the allocations
+        run: |
+          ./build/feed_handler gen synthetic.itch --events 3000000 --seed 7 --stocks 64
+          set +e
+          ./build/perfguard run synthetic.itch --runs 3 --warmup 500000 --cpu 1 > perfguard.txt 2>&1
+          status=$?
+          set -e
+          cat perfguard.txt
+          if [ "$status" -eq 1 ] && grep -q "heap allocations after warmup" perfguard.txt; then
+            echo "OK: the injected allocation was caught (exit $status)"
+          else
+            echo "::error::perfguard did not catch the injected allocation (exit $status)"; exit 1
+          fi
+
   end-to-end:
     name: end-to-end on a synthetic feed
     runs-on: ubuntu-24.04
@@ -98,6 +125,10 @@ jobs:
           cmake --build build -j4
       - name: Generate feed
         run: ./build/feed_handler gen synthetic.itch --events 3000000 --seed 7 --stocks 64
+      # Fails on any heap allocation after warmup. Timings are printed for the
+      # log only: shared runners are too noisy to gate on.
+      - name: PerfGuard (zero allocations after warmup)
+        run: ./build/perfguard run synthetic.itch --runs 3 --warmup 500000 --cpu 1
       - name: Count, golden, verify every queue
         run: |
           ./build/feed_handler count synthetic.itch --repeat 2
