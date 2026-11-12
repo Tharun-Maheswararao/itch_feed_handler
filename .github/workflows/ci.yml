@@ -15,7 +15,7 @@ jobs:
           - { os: ubuntu-24.04, cxx: g++-14, build: Release }
           - { os: ubuntu-24.04, cxx: clang++-18, build: Release }
           - { os: ubuntu-24.04, cxx: g++-14, build: Debug }
-          - { os: macos-14, cxx: clang++, build: Release }
+          - { os: macos-15, cxx: clang++, build: Release }
     steps:
       - uses: actions/checkout@v4
       - name: Install Boost (lockfree baseline)
