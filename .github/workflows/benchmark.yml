@@ -131,7 +131,7 @@ jobs:
           $SUDO apt-get install -y -q build-essential cmake curl libboost-dev \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
           if [ "${{ inputs.mode }}" = net ]; then
-            $SUDO apt-get install -y -q libxdp-dev libbpf-dev clang llvm iproute2 ethtool
+            $SUDO apt-get install -y -q libxdp-dev libbpf-dev clang llvm pkg-config iproute2 ethtool
           fi
           if [ "${{ inputs.mode }}" = publish ]; then
             $SUDO apt-get install -y -q protobuf-compiler libprotobuf-dev libzmq3-dev cppzmq-dev \
@@ -378,7 +378,7 @@ jobs:
           SUDO=$(command -v sudo || true)
           export DEBIAN_FRONTEND=noninteractive
           $SUDO apt-get update -q
-          $SUDO apt-get install -y -q build-essential cmake python3 iproute2 ethtool libxdp-dev libbpf-dev clang llvm
+          $SUDO apt-get install -y -q build-essential cmake pkg-config python3 iproute2 ethtool libxdp-dev libbpf-dev clang llvm
       - name: Build
         run: |
           cmake -S . -B build-net -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF -DFH_ENABLE_XDP=ON
