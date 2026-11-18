@@ -2,7 +2,7 @@
 //
 // Replays the ITCH file through the order-level golden model
 // (GoldenFifoBook) and writes the checkpoint hashes every later Version 2
-// stage must reproduce. See golden_hashes.hpp for the format.
+// stage must reproduce. See include/fh/verify/golden_hashes.hpp for the format.
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -13,7 +13,7 @@
 #include "fh/parser/mapped_file.hpp"
 #include "fh/util/platform.hpp"
 #include "fh/parser/parser.hpp"
-#include "golden_hashes.hpp"
+#include "fh/verify/golden_hashes.hpp"
 
 using namespace fh;
 

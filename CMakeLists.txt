@@ -18,6 +18,8 @@ option(FH_WITH_BOOST "Build the boost::lockfree::spsc_queue baseline if Boost is
 option(FH_INJECT_ORDERING_BUG "Deliberate bug: publish the SPSC head with a relaxed store" OFF)
 option(FH_INJECT_HOT_ALLOC "Deliberate bug: FifoBook::add grows a std::vector (perfguard must fail)" OFF)
 option(FH_ENABLE_PUBLISH "Build the ZeroMQ + Protobuf snapshot publisher (bench --publish)" OFF)
+option(FH_ENABLE_XDP "Build the AF_XDP receive path (Linux: libxdp, libbpf, clang for the BPF program)" OFF)
+option(FH_ENABLE_DPDK "Build the DPDK receive path (Linux: libdpdk)" OFF)
 
 find_package(Threads REQUIRED)
 
@@ -93,6 +95,64 @@ endif()
 add_executable(golden_hashes tools/golden_hashes.cpp)
 target_link_libraries(golden_hashes PRIVATE fh_core)
 
+# Version 2 network path (Stages C1-C3): MoldUDP64 publisher, kernel-socket
+# receiver, arbitration and recovery. POSIX sockets only, no extra libraries.
+add_library(fh_net STATIC
+  src/net_udp.cpp
+  src/mold_publisher.cpp
+  src/udp_rx.cpp
+  src/receiver.cpp
+  src/recovery_servers.cpp
+  src/recovery_client.cpp)
+target_link_libraries(fh_net PUBLIC fh_core)
+
+# Kernel bypass (Stage C4): the same RxPath interface, Linux only.
+if(FH_ENABLE_XDP OR FH_ENABLE_DPDK)
+  find_package(PkgConfig REQUIRED)
+endif()
+if(FH_ENABLE_XDP)
+  pkg_check_modules(LIBXDP REQUIRED IMPORTED_TARGET libxdp)
+  pkg_check_modules(LIBBPF REQUIRED IMPORTED_TARGET libbpf)
+  find_program(FH_BPF_CLANG NAMES clang clang-18 clang-17 clang-16 REQUIRED)
+  if(CMAKE_LIBRARY_ARCHITECTURE)
+    set(_multiarch ${CMAKE_LIBRARY_ARCHITECTURE})
+  else()
+    set(_multiarch ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+  endif()
+  set(FH_XDP_OBJ ${CMAKE_CURRENT_BINARY_DIR}/xdp_feed.bpf.o)
+  add_custom_command(
+    OUTPUT ${FH_XDP_OBJ}
+    COMMAND ${FH_BPF_CLANG} -O2 -g -target bpf -I/usr/include/${_multiarch}
+            -c ${CMAKE_CURRENT_SOURCE_DIR}/bpf/xdp_feed.bpf.c -o ${FH_XDP_OBJ}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bpf/xdp_feed.bpf.c
+    COMMENT "clang -target bpf xdp_feed.bpf.c")
+  add_custom_target(fh_xdp_prog ALL DEPENDS ${FH_XDP_OBJ})
+  target_sources(fh_net PRIVATE src/xdp_rx.cpp)
+  target_link_libraries(fh_net PUBLIC PkgConfig::LIBXDP PkgConfig::LIBBPF)
+  target_compile_definitions(fh_net PUBLIC FH_HAVE_XDP FH_XDP_OBJECT="${FH_XDP_OBJ}")
+  add_dependencies(fh_net fh_xdp_prog)
+  message(STATUS "AF_XDP receive path: libxdp ${LIBXDP_VERSION}, libbpf ${LIBBPF_VERSION}")
+endif()
+if(FH_ENABLE_DPDK)
+  pkg_check_modules(LIBDPDK REQUIRED IMPORTED_TARGET libdpdk)
+  target_sources(fh_net PRIVATE src/dpdk_rx.cpp)
+  target_link_libraries(fh_net PUBLIC PkgConfig::LIBDPDK)
+  # DPDK's headers use GNU extensions that -Wpedantic reports.
+  target_include_directories(fh_net SYSTEM PRIVATE ${LIBDPDK_INCLUDE_DIRS})
+  target_compile_definitions(fh_net PUBLIC FH_HAVE_DPDK)
+  message(STATUS "DPDK receive path: ${LIBDPDK_VERSION}")
+endif()
+
+add_executable(itch_publisher tools/itch_publisher.cpp)
+target_link_libraries(itch_publisher PRIVATE fh_net)
+add_executable(itch_receiver tools/itch_receiver.cpp)
+target_link_libraries(itch_receiver PRIVATE fh_net)
+if(NOT FH_SANITIZE)
+  # The receiver reports heap allocations after warmup (must be zero).
+  target_link_libraries(itch_receiver PRIVATE fh_alloc_counter)
+  target_compile_definitions(itch_receiver PRIVATE FH_HAVE_ALLOC_COUNTER)
+endif()
+
 # Version 1.1 snapshot publisher. Off by default, so the sanitizer jobs and
 # the benchmarks build exactly as before and need neither library.
 if(FH_ENABLE_PUBLISH)
@@ -153,6 +213,12 @@ if(FH_BUILD_TESTS)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE fh_core GTest::gtest_main)
     gtest_discover_tests(test_${t} DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600)
+  endforeach()
+  foreach(t mold arbiter net frame)
+    add_executable(test_${t} tests/test_${t}.cpp)
+    target_link_libraries(test_${t} PRIVATE fh_net GTest::gtest_main)
+    # Loopback UDP tests bind their own ports: run them one at a time.
+    gtest_discover_tests(test_${t} DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
   endforeach()
   # The allocation proof replaces global new/delete, which the sanitizers'
   # own allocators also do, so it only runs in non-sanitizer builds.

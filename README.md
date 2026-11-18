@@ -388,25 +388,78 @@ risk process), not a trading fast path: there market data moves through
 shared memory or multicast with fixed binary layouts. That fast path is
 Version 2.
 
-## Version 2 (planned): Stage C
+## Version 2: the book over a real network path (Stage C)
 
-Version 1 is a replay tool: it reads a file, measures parse-to-book latency
-and keeps aggregated price levels. [Version 2](docs/ROADMAP_V2.md) puts it on
-a real network path:
+Version 1 reads a file. Version 2 replays the same day as **MoldUDP64 over
+UDP on two redundant lines**, loses packets on purpose, recovers them, and
+still has to rebuild an **order-level book identical to the file replay at
+every checkpoint**. Plan: [ROADMAP_V2.md](docs/ROADMAP_V2.md); design and
+results: [DESIGN.md sections 15 and 17](docs/DESIGN.md#17-version-2-the-network-path-stages-c1-to-c4).
 
-* **C0 ✅ done:** order-level FIFO book (queue position at every level) with
-  price-indexed levels near the touch. On the full day it reproduces the
-  golden hash file at every checkpoint with **zero heap allocations**.
-  Keeping queue position costs about 20% against Version 1's aggregated
-  book (66.8 vs 55.4 ns per message, single thread)
-  ([DESIGN.md section 15](docs/DESIGN.md#15-stage-c0-the-order-level-book))
-* **C1** MoldUDP64 replay publisher with seeded loss injection
-* **C2** kernel `recvmmsg` receiver with A/B line arbitration and wire-to-book
-  timestamps (hardware where available, labelled otherwise)
-* **C3** gap recovery: other line, then retransmit, then snapshot, verified
-  by a seeded loss test matrix against the file replay's book hashes
-* **C4** kernel bypass with AF_XDP, then DPDK (time-boxed), on two bare-metal
-  hosts
+| Stage | What | Status |
+|---|---|---|
+| **C0** | order-level FIFO book (queue position at every level), zero heap allocations; about 20% slower than Version 1's aggregated book (66.8 vs 55.4 ns per message), measured and explained | ✅ |
+| **C1** | MoldUDP64 replay publisher: packets sent straight from the file mapping, lines A and B, fixed-rate or timestamp pacing, heartbeats, **seeded loss injection** (drops per line and on both, bursts, duplicates, reordering, dead line) | ✅ |
+| **C2** | receiver: one busy-polling thread arbitrates both lines (first copy of each sequence wins, duplicates and overlaps dropped, reorder buffer), wire-to-book timestamps with their source on every result | ✅ |
+| **C3** | gap recovery off the hot path: other line, then MoldUDP64 re-request, then **book snapshot** resync; retransmit server with retention, request caps and per-client rate limits; a 10-row loss test matrix with 3 seeds each in CI | ✅ |
+| **C4** | kernel bypass behind the same receive interface: **AF_XDP** (XDP program redirects only the feed's ports) and **DPDK** (functional, time-boxed) | ✅ code and CI; EC2 numbers: run the `net` / `net2` workflow modes |
+
+```
+itch_publisher ──line A (UDP)──┐                    ┌─ kernel sockets | AF_XDP | DPDK
+  + seeded loss ──line B (UDP)──┼──> receiver thread: arbiter, reorder buffer, gap timer
+  retransmit server <── re-request ── recovery thread (SPSC in, SPSC out)
+  snapshot server ─── book (TCP) ──┘        │ SPSC ring
+                                       book thread: FifoBook, digest chain, golden checkpoints
+```
+
+**The full Nasdaq day over the network** (M4, loopback, two lines, 2 M
+msgs/s, [log](results/v2/c2_full_day_loopback_m4.txt)): all 268,744,780
+messages delivered, **251 of 251 checkpoints and the final book match the
+golden file** (level digest after every message, queue order at every
+checkpoint), **zero heap allocations after warmup**.
+Again **under seeded loss** (0.1% per line, 0.01% on both, a 500-packet
+burst on both, duplicates and reordering; [log](results/v2/c3_full_day_loss_m4.txt)):
+2,374 gaps, 1,676 filled by the other line and 698 by re-request (5,521
+packets recovered, p50 1.3 ms), and still **251 of 251 checkpoints, the
+final book, and zero allocations**.
+
+**One Linux host, two network namespaces, lines on two multicast groups**
+(Docker on the M4, unpinned, a 3 M-message synthetic feed at 1 M msgs/s,
+two separate runs; [log](results/v2/netns_linux_docker.txt)). Every run is
+checked against its golden file, and every one passed:
+
+| Receive path | Scenario | Gaps: other line / re-request / snapshot | Wire to book p50, run 1 / run 2 |
+|---|---|---|---:|
+| kernel sockets (`recvmmsg`) | clean | 0 | 2.88 / 2.43 µs |
+| kernel sockets | 1% loss per line, 0.2% on both, 500-packet burst, duplicates, reordering | 21 / 144 / 0 | 2.75 / 2.62 µs |
+| kernel sockets | late join, then line A dies | 0 / 0 / 1 | 2.50 / 3.20 µs |
+| AF_XDP (copy mode, generic XDP on the veth) | clean | 0 | 1.82 / 1.89 µs |
+| AF_XDP | loss and a 200-packet burst | 0 / 132 / 0 | 1.82 / 1.85 µs |
+| DPDK (`af_packet` device) | clean, and under loss | 0 / 138 / 0 under loss | 1.73 / 1.73 µs |
+
+The medians repeat; the tails do not. Unpinned in a laptop VM, the same
+configuration's p99 moved by up to 300× between the two runs (AF_XDP clean:
+9.5 µs, then 2.9 ms), so this table says nothing about tails, and nothing
+here should be read as "AF_XDP has the better tail". The timestamp sources
+also differ: the socket rows use the kernel's receive stamp, AF_XDP and DPDK
+a user-space poll stamp, which comes later and so flatters the socket path.
+Pinned EC2 numbers, one host and two hosts, come from the benchmark
+workflow's `net` and `net2` modes ([how](docs/AWS_BENCHMARK.md)).
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+build/golden_hashes data/12302019.NASDAQ_ITCH50 golden.txt     # or use results/v2/golden_hashes_12302019.txt
+build/itch_receiver --line-a 127.0.0.1:31001 --line-b 127.0.0.1:31002 --golden golden.txt \
+  --retransmit 127.0.0.1:31003 --snapshot 127.0.0.1:31004 --start-timeout-ms 120000
+build/itch_publisher data/12302019.NASDAQ_ITCH50 --line-a 127.0.0.1:31001 --line-b 127.0.0.1:31002 \
+  --rate 2000000 --retransmit-listen 127.0.0.1:31003 --snapshot-listen 127.0.0.1:31004 \
+  --seed 7 --drop-a 0.01 --drop-b 0.01 --drop-both 0.001 --drop-range 1000-1499:ab
+```
+
+On Linux, `sudo bench/netns_feed.sh build FILE GOLDEN` runs the same pair in
+two namespaces over multicast (`TRANSPORT=xdp` or `dpdk` with
+`-DFH_ENABLE_XDP=ON` / `-DFH_ENABLE_DPDK=ON`), and
+`sudo bench/net_benchmark.sh build FILE GOLDEN` produces the results table.
 
 ## Architecture
 
@@ -470,6 +523,8 @@ curl -L -o data/12302019.NASDAQ_ITCH50.gz "https://emi.nasdaq.com/ITCH/Nasdaq%20
 | `feed_handler bench … --publish 'tcp://*:5556' [--publish-symbol AAPL]` | publish the book over ZeroMQ (needs `-DFH_ENABLE_PUBLISH=ON`); `scripts/sub_snapshots.py` subscribes |
 | `bench/publish_overhead.sh FILE` | throughput and p99 with publishing off and on |
 | `feed_handler gen OUT --events N` | synthetic ITCH feed (used by CI) |
+| `itch_publisher FILE --line-a H:P --line-b H:P [--rate N] [loss options]` | Version 2: replay as MoldUDP64 on two lines, with retransmit and snapshot servers (`--retransmit-listen`, `--snapshot-listen`) |
+| `itch_receiver --line-a H:P --line-b H:P --golden FILE [--retransmit H:P --snapshot H:P]` | Version 2: receive, arbitrate, recover, verify against the golden file; `--transport xdp\|dpdk` on Linux |
 | `micro_bench FILE` | parse-only, golden vs fast book, raw SPSC transfer |
 
 **Everything (benchmarks, CSVs and all five charts) from one command:**
@@ -495,6 +550,10 @@ existing CSVs, run `python3 scripts/plot_results.py`.
 | [`test_histogram`](tests/test_histogram.cpp), [`test_seqlock`](tests/test_seqlock.cpp) | bucket math and error bound; no torn snapshot across 3M concurrent writes |
 | [`test_snapshot_publisher`](tests/test_snapshot_publisher.cpp) | (v1.1, publisher builds only) Protobuf round trip; a TCP subscriber gets consistent, ordered snapshots; unchanged books are not resent; a stalled subscriber never blocks the publisher; the pipeline's hash chain is identical with publishing on |
 | [`test_queue_stress`](tests/test_queue_stress.cpp) | the same 8 stress tests for all five queues (Stage B): exact +1 sequence, random-delay interleavings, 4-slot wraparound, payload integrity, full/empty, book hash vs golden at every checkpoint |
+| [`test_mold`](tests/test_mold.cpp) | (Version 2) MoldUDP64 framing round trip byte for byte, payload limit, corrupt packets rejected, sequence index; seeded loss is deterministic, line-independent and logged; the publisher's rate is within 5% of the request; heartbeats; a dead line goes silent |
+| [`test_arbiter`](tests/test_arbiter.cpp) | arbitration without sockets: duplicates, a lagging line, reordering, lines that pack differently (overlaps), gaps left for recovery, buffer overflow, heartbeat-revealed tails, snapshot reset, foreign sessions; 40 random interleavings deliver every message exactly once, in order |
+| [`test_net`](tests/test_net.cpp) | publisher → loopback UDP → receiver: clean run, line A dies, byte-for-byte capture; the **recovery test matrix** (10 scenarios × 3 seeds), every run matching the golden model |
+| [`test_frame`](tests/test_frame.cpp), [`test_fifo_alloc`](tests/test_fifo_alloc.cpp) | Ethernet/IPv4/UDP parsing for AF_XDP and DPDK (VLAN, IP options, padding; short, fragmented and non-UDP frames rejected); `clear()` and snapshot load allocate nothing and rebuild the book exactly |
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every
 push. It builds with gcc and clang on Linux and clang on macOS, in Release and
@@ -503,7 +562,11 @@ ThreadSanitizer as three separate builds. A fourth job builds the deliberate
 ordering bug and passes only if ThreadSanitizer reports it. An end-to-end job generates a
 synthetic feed and runs count → golden → verify → bench → charts. A publisher
 job builds with ZeroMQ and Protobuf, runs their tests, and checks that a
-Python subscriber receives the book over TCP.
+Python subscriber receives the book over TCP. A network job runs Version 2
+in two Linux namespaces over multicast, kernel sockets and AF_XDP, clean and
+under seeded loss, late join included, each run matching the golden model
+with zero allocations; a DPDK job does the same through DPDK's `af_packet`
+device.
 
 ## Repository layout
 
@@ -515,6 +578,13 @@ include/fh/stats/    clock, histogram, report/CSV
 include/fh/view/     seqlock, snapshot, live view
 include/fh/pub/      snapshot publisher (v1.1, ZeroMQ + Protobuf); schema in proto/
 include/fh/testing/  ITCH encoder + synthetic feed generator
+include/fh/mold/     MoldUDP64 format, sequence index, seeded loss, replay publisher (Version 2)
+include/fh/net/      receive paths (kernel UDP, AF_XDP, DPDK), frame parsing, receiver
+include/fh/arb/      line arbitration, gap detection, reorder buffer
+include/fh/recovery/ retransmit and snapshot servers, recovery thread, snapshot format
+include/fh/verify/   golden hash file format and in-memory builder
+bpf/                 XDP program for the AF_XDP path
+tools/               golden_hashes, fifo_check, perfguard, itch_publisher, itch_receiver
 include/fh/pipeline.hpp   two-thread pipeline and single-thread reference run
 src/                 CLI, report, sysinfo, live view
 tests/               GoogleTest suites
@@ -522,6 +592,7 @@ bench/               micro-benchmarks, one-command benchmark script
 scripts/             plot_results.py (charts), make_gif.py (README GIF), summarize_results.py, sub_snapshots.py
 bench/aws/           one-time AWS setup for the EC2 benchmark workflow
 bench/run_matrix.sh  Stage B queue matrix; bench/queue_stress.cpp long-run stress tool
+bench/netns_feed.sh  Version 2 in two namespaces; net_benchmark.sh (one host) and net_two_host.sh (two hosts) for the results table
 third_party/rigtorp/ vendored SPSCQueue.h (MIT), with VERSION
 docs/                charts, GIF, design document
 results/             CSV output and logs from the runs shown above

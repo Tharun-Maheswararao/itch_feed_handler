@@ -76,7 +76,7 @@ GitHub → **Actions** → **Linux benchmark** → **Run workflow** (on `main`):
 
 | Input | Default | Notes |
 |---|---|---|
-| `mode` | `benchmark` | `diagnose` runs [`bench/diagnose.sh`](../bench/diagnose.sh) instead: pipeline-overhead experiments, about 35 min, artifact `linux-diagnose-<run id>` plus the run summary, no PR ; `publish` runs [`bench/publish_overhead.sh`](../bench/publish_overhead.sh): the Version 1.1 publisher off vs on, pinned, about 15 min, artifact `linux-publish-<run id>`, no PR |
+| `mode` | `benchmark` | `diagnose` runs [`bench/diagnose.sh`](../bench/diagnose.sh) instead: pipeline-overhead experiments, about 35 min, artifact `linux-diagnose-<run id>` plus the run summary, no PR ; `publish` runs [`bench/publish_overhead.sh`](../bench/publish_overhead.sh): the Version 1.1 publisher off vs on, pinned, about 15 min, artifact `linux-publish-<run id>`, no PR; `net` and `net2`: Version 2, see below |
 | `instance_type` | `c7i.2xlarge` | 4 physical cores, 16 GB. `c7i.metal-24xl` has no hypervisor or noisy neighbours, for the cleanest tails, at about $4/h |
 | `rate` | `2000000` | paced replay rate |
 | `runs` | `5` | timed runs per configuration, after one warmup |
@@ -94,6 +94,51 @@ golden check.
 **Cost:** a `c7i.2xlarge` in us-east-1 is about $0.36/h, so **under $0.50 per
 run** including the 40 GB disk. GitHub-hosted minutes for the small start,
 stop and PR jobs are free on public repos.
+
+### Version 2 modes: `net` (one host) and `net2` (two hosts)
+
+`mode=net` runs [`bench/net_benchmark.sh`](../bench/net_benchmark.sh) on one
+instance: the publisher and the receiver in two network namespaces joined by
+a veth pair, lines A and B on two multicast groups, each receive path
+(kernel sockets, AF_XDP) as one seeded-loss verification run plus `runs`
+clean latency runs and one full-speed run, and Version 1's file replay at
+the same rate for reference. Every run is checked against
+`results/v2/golden_hashes_12302019.txt`. About 50 minutes on a
+`c7i.2xlarge` (under $0.50); a PR adds `results/v2/net/<instance>/`.
+
+`mode=net2` starts a **second instance**: the first publishes, the second
+receives over the VPC. A VPC carries no multicast without a Transit Gateway,
+so the lines are unicast to two ports on the receiver
+([`bench/net_two_host.sh`](../bench/net_two_host.sh)). The same run plan as
+`net`; AF_XDP is attempted on the ENA interface (the script sets it to one
+channel so every feed packet reaches the one queue the socket binds, and
+restores it) and skipped, not failed, if the NIC refuses. A PR adds
+`results/v2/net2/<instance>/`. About 60 minutes; two `c7i.2xlarge` cost
+under $1, two `c7i.metal-24xl` about $9.
+
+**One-time change for `net2`:** the two instances must reach each other.
+Allow all traffic from the security group to itself (the instances share it;
+nothing outside the group gains access):
+
+```bash
+aws ec2 authorize-security-group-ingress --region us-east-1 \
+  --group-id <AWS_SECURITY_GROUP_ID> --protocol -1 --source-group <AWS_SECURITY_GROUP_ID>
+```
+
+Without it the publisher job waits for the receiver's ready port until its
+150-minute timeout. Neither mode needs new IAM permissions: the role already
+launches, describes and terminates tagged instances. EC2's ENA has no
+hardware receive timestamps, so the rows say "kernel software" or
+"user-space poll", never "NIC". DPDK on EC2 (a second interface bound to
+`vfio-pci`) is not automated; the DPDK path is verified in CI only.
+
+```bash
+gh workflow run benchmark.yml --repo Tharun-Maheswararao/itch_feed_handler -f mode=net -f instance_type=c7i.2xlarge -f runs=3
+```
+
+```bash
+gh workflow run benchmark.yml --repo Tharun-Maheswararao/itch_feed_handler -f mode=net2 -f instance_type=c7i.2xlarge -f runs=3
+```
 
 ## Safety nets
 

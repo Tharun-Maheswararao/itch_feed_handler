@@ -38,9 +38,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { sanitize: address, items: "300000" }
-          - { sanitize: undefined, items: "300000" }
-          - { sanitize: thread, items: "50000" }
+          - { sanitize: address, items: "300000", net_rate: "100000" }
+          - { sanitize: undefined, items: "300000", net_rate: "100000" }
+          - { sanitize: thread, items: "50000", net_rate: "40000" }
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -q && sudo apt-get install -y -q libboost-dev
@@ -54,6 +54,7 @@ jobs:
         env:
           FH_STRESS_ITEMS: ${{ matrix.items }}
           FH_SPSC_ITEMS: "2000000"
+          FH_NET_RATE: ${{ matrix.net_rate }}  # loopback publisher rate the slowed-down receiver keeps up with
           ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           TSAN_OPTIONS: halt_on_error=1
@@ -188,3 +189,76 @@ jobs:
           wait
           head -3 sub.txt; tail -1 sub.txt
           grep -q "^received [1-9]" sub.txt
+
+  # Version 2 on one Linux host (Stages C2-C4): publisher and receiver in two
+  # network namespaces joined by a veth pair, lines A and B on two multicast
+  # groups. Kernel sockets and AF_XDP, clean and under seeded loss. Each run
+  # must match the golden model at every checkpoint, with zero heap
+  # allocations after warmup.
+  network:
+    name: network path (netns multicast, kernel sockets and AF_XDP)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libraries
+        run: sudo apt-get update -q && sudo apt-get install -y -q libxdp-dev libbpf-dev clang llvm
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_BUILD_TESTS=OFF \
+            -DFH_WITH_BOOST=OFF -DFH_ENABLE_XDP=ON
+          cmake --build build -j4 --target feed_handler golden_hashes itch_publisher itch_receiver
+      - name: Synthetic feed and its golden hashes
+        run: |
+          ./build/feed_handler gen synthetic.itch --events 3000000 --seed 7 --stocks 64
+          ./build/golden_hashes synthetic.itch synthetic.golden --every 262144
+      - name: Kernel sockets, clean
+        run: sudo OUT=out/udp_clean RATE=1000000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+      - name: Kernel sockets, 1% loss per line, 0.2% on both, a 500-packet burst on both
+        run: >
+          sudo OUT=out/udp_loss RATE=1000000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+          --- --seed 5 --drop-a 0.01 --drop-b 0.01 --drop-both 0.002 --drop-range 20000-20499:ab
+          --duplicate 0.01 --reorder 0.01
+      - name: Kernel sockets, late join (snapshot), line A dies
+        run: >
+          sudo OUT=out/udp_late RATE=1000000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+          -- --snapshot-threshold 100000 --- --drop-range 0-2999:ab --kill-a 40000
+      - name: AF_XDP (generic XDP on the veth), clean
+        run: sudo OUT=out/xdp_clean TRANSPORT=xdp RATE=1000000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+      - name: AF_XDP under loss
+        run: >
+          sudo OUT=out/xdp_loss TRANSPORT=xdp RATE=1000000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+          --- --seed 9 --drop-a 0.01 --drop-b 0.01 --drop-both 0.002 --drop-range 30000-30199:ab
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: network-logs
+          path: out
+
+  # DPDK is time-boxed in the plan: this job only proves the DPDK receive
+  # path builds and delivers a verified book, through DPDK's af_packet device
+  # on the same veth (no hugepages, no NIC). Real numbers need a NIC bound to
+  # vfio-pci on bare metal (docs/AWS_BENCHMARK.md).
+  dpdk:
+    name: DPDK receive path (af_packet device, functional)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install DPDK
+        run: sudo apt-get update -q && sudo apt-get install -y -q dpdk-dev libdpdk-dev pkg-config
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=OFF -DFH_BUILD_TESTS=OFF \
+            -DFH_WITH_BOOST=OFF -DFH_ENABLE_DPDK=ON
+          cmake --build build -j4 --target feed_handler golden_hashes itch_publisher itch_receiver
+      - name: DPDK, clean and under loss
+        run: |
+          ./build/feed_handler gen synthetic.itch --events 2000000 --seed 7 --stocks 64
+          ./build/golden_hashes synthetic.itch synthetic.golden --every 262144
+          sudo OUT=out/dpdk_clean TRANSPORT=dpdk RATE=500000 bench/netns_feed.sh build synthetic.itch synthetic.golden
+          sudo OUT=out/dpdk_loss TRANSPORT=dpdk RATE=500000 bench/netns_feed.sh build synthetic.itch synthetic.golden \
+            --- --seed 4 --drop-a 0.01 --drop-b 0.01 --drop-both 0.002
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dpdk-logs
+          path: out

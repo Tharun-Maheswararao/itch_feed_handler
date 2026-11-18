@@ -1,0 +1,35 @@
+# Stage C3: full Nasdaq day (12302019) over loopback UDP with seeded loss and recovery, Apple M4 (unpinned), mains power
+# itch_publisher --rate 2000000 --seed 2019 --drop-a 0.001 --drop-b 0.001 --drop-both 0.0001 --drop-range 3000000-3000499:ab --duplicate 0.0005 --reorder 0.0005
+# A Docker build ran on the same machine, so the kernel also dropped 4,865 packets (system-wide); recovery filled those too.
+# Verification run: the latency tail here is the verification walks and recovery, not a latency result.
+
+## publisher
+retransmit server on port 31503 (268744780 messages indexed, retention all, max 2048 per request)
+snapshot server on port 31504
+publishing data/12302019.NASDAQ_ITCH50 (8251407909 bytes) on A=127.0.0.1:31501 B=127.0.0.1:31502, rate 2000000 msgs/s
+published 268744780 messages in 6049916 packets, 134.37 s, 2000000 msgs/s
+  line A: sent 6045905, dropped 7092, duplicated 3081, delayed 2974
+  line B: sent 6045737, dropped 7206, duplicated 3027, delayed 3061
+  heartbeats 0, send errors 0, loss seed 2019
+  retransmit: 826 requests, 244982 messages in 5521 packets; trimmed 0, refused (retention) 0, rate limited 0, bad 0
+  snapshots: 0 served (0.0 MB, last at seq 0), 0 failed
+
+## receiver
+listening: A=127.0.0.1:31501 (rcvbuf 8388608) B=127.0.0.1:31502 (rcvbuf 8388608), kernel software receive timestamp requested
+receiver ready
+receiver: kernel UDP sockets (recvmsg), 151.50 s, stopped: end of session
+  packets A 6043387, B 6043213, recovered 5521; heartbeats 0, end of session 2
+  messages 268744780 (book 263250843); duplicates 5985436, overlaps 7, buffered 74116, overflow 0
+  gaps 2374: filled by the other line 1676, by re-request 698, by snapshot 0
+    other line: open p50 0.0 us, p99 12.0 us
+    re-request: recovery time p50 1278.0 us, p99 55574.5 us, max 156595.0 us
+  recovery: 774 requests, 826 re-requests sent, 20 retries, 0 exhausted, 5521 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 4865
+  wire to book (kernel software receive timestamp, 16442428 samples): p50 11.01 us, p90 45088.77, p99 90177.54, p99.9 132120.58, max 217562.00
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (251 of 251)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS

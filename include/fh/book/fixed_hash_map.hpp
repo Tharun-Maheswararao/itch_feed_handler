@@ -8,6 +8,7 @@
 // Key 0 is stored out of line, so every 64-bit key is valid.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -86,6 +87,12 @@ public:
         slots_[hole].key = 0;
         --size_;
         return true;
+    }
+
+    void clear() noexcept {
+        std::fill(slots_.begin(), slots_.end(), Slot{});
+        size_ = 0;
+        zero_used_ = false;
     }
 
     std::size_t size() const noexcept { return size_ + (zero_used_ ? 1 : 0); }

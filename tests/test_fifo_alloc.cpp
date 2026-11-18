@@ -9,6 +9,7 @@
 #include "fh/book/fifo_book.hpp"
 #include "fh/book/golden_fifo_book.hpp"
 #include "fh/parser/parser.hpp"
+#include "fh/recovery/snapshot.hpp"
 #include "fh/stats/alloc_counter.hpp"
 #include "fh/testing/itch_writer.hpp"
 
@@ -61,3 +62,56 @@ TEST(FifoAlloc, GoldenModelDoesAllocate) {
     parse_buffer(feed.data(), feed.data() + feed.size(), [&](const Msg& m) { apply(*g, m); });
     EXPECT_GT(allocation_count() - before, 1000u);
 }
+
+// Stage C3 snapshot recovery on the receiver: clear() a used book and load a
+// snapshot into it with no allocation, and the result is the same book (same
+// queues, same level hash), which then tracks the rest of the feed exactly.
+TEST(FifoAlloc, ClearAndSnapshotLoadAllocateNothingAndRebuildTheBook) {
+    const auto feed = synth::synthetic_feed(200'000, 41, 20, /*wide=*/true);
+    std::vector<Msg> msgs;
+    parse_buffer(feed.data(), feed.data() + feed.size(), [&](const Msg& m) { msgs.push_back(m); });
+    const std::size_t half = msgs.size() / 2;
+
+    auto source = std::make_unique<FifoBook<true>>(config());
+    auto target = std::make_unique<FifoBook<true>>(config());
+    for (std::size_t i = 0; i < half; ++i) apply(*source, msgs[i]);
+    for (std::size_t i = 0; i < half / 3; ++i) apply(*target, msgs[i]);  // some other, older state
+    std::vector<uint8_t> snap;
+    recovery::write_snapshot(*source, recovery::SnapshotHeader{half, half, 0, 0, 0}, snap);
+    ASSERT_GT(source->order_count(), 1000u);
+
+    const uint64_t before = allocation_count();
+    target->clear();
+    recovery::load_snapshot(*target, snap.data());
+    EXPECT_EQ(allocation_count() - before, 0u) << "clear() or load_snapshot() allocated";
+
+    EXPECT_EQ(target->order_count(), source->order_count());
+    EXPECT_EQ(target->hash(), source->hash());
+    EXPECT_EQ(target->order_hash(), source->order_hash());
+    std::string err;
+    EXPECT_TRUE(target->check_invariants(&err)) << err;
+    for (std::size_t i = half; i < msgs.size(); ++i) {
+        apply(*source, msgs[i]);
+        apply(*target, msgs[i]);
+    }
+    EXPECT_EQ(target->hash(), source->hash());
+    EXPECT_EQ(target->order_hash(), source->order_hash());
+}
+
+TEST(FifoAlloc, ClearedBookEqualsAFreshOne) {
+    const auto feed = synth::synthetic_feed(50'000, 9, 10, true);
+    auto used = std::make_unique<FifoBook<true>>(config());
+    auto fresh = std::make_unique<FifoBook<true>>(config());
+    parse_buffer(feed.data(), feed.data() + feed.size(), [&](const Msg& m) { apply(*used, m); });
+    used->clear();
+    EXPECT_EQ(used->order_count(), 0u);
+    EXPECT_EQ(used->hash(), 0u);
+    EXPECT_EQ(used->order_hash(), fresh->order_hash());
+    parse_buffer(feed.data(), feed.data() + feed.size(), [&](const Msg& m) {
+        apply(*used, m);
+        apply(*fresh, m);
+    });
+    EXPECT_EQ(used->order_hash(), fresh->order_hash());
+    EXPECT_EQ(used->hash(), fresh->hash());
+}
+

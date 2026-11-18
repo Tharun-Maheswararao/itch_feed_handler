@@ -9,6 +9,13 @@
 #   3. uploads results as an artifact and opens a pull request with them,
 #   4. terminates the instance, even if anything above failed.
 #
+# mode=net (Version 2, one host): publisher and receiver in two network
+# namespaces on the instance, kernel sockets and AF_XDP, against the golden
+# file, plus Version 1 on the same host; results PR. mode=net2: a second
+# instance receives over the VPC (unicast), the first publishes; results PR.
+# net2 needs the security group to allow its ports between the two
+# instances (docs/AWS_BENCHMARK.md).
+#
 # One-time AWS and GitHub setup: docs/AWS_BENCHMARK.md.
 name: Linux benchmark
 
@@ -16,10 +23,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "benchmark = Stage A run + PR; matrix = Stage B queue matrix + PR; diagnose = overhead experiments (artifact only); publish = v1.1 publisher on/off (artifact only)"
+        description: "benchmark = Stage A run + PR; matrix = Stage B queue matrix + PR; diagnose = overhead experiments (artifact only); publish = v1.1 publisher on/off (artifact only); net = Version 2 on one host + PR; net2 = Version 2 across two hosts + PR"
         type: choice
         default: benchmark
-        options: [benchmark, matrix, diagnose, publish]
+        options: [benchmark, matrix, diagnose, publish, net, net2]
       instance_type:
         description: EC2 instance type (needs >= 16 GB RAM so the day fits in page cache)
         type: choice
@@ -110,6 +117,7 @@ jobs:
   benchmark:
     name: ${{ inputs.mode }} on ${{ inputs.instance_type }}
     needs: start-runner
+    if: ${{ inputs.mode != 'net2' }}
     runs-on: ${{ needs.start-runner.outputs.label }}
     timeout-minutes: 240
     steps:
@@ -122,6 +130,9 @@ jobs:
           $SUDO apt-get update -q
           $SUDO apt-get install -y -q build-essential cmake curl libboost-dev \
             python3-pandas python3-matplotlib python3-pil fonts-dejavu-core
+          if [ "${{ inputs.mode }}" = net ]; then
+            $SUDO apt-get install -y -q libxdp-dev libbpf-dev clang llvm iproute2 ethtool
+          fi
           if [ "${{ inputs.mode }}" = publish ]; then
             $SUDO apt-get install -y -q protobuf-compiler libprotobuf-dev libzmq3-dev cppzmq-dev \
               python3-zmq python3-protobuf
@@ -221,6 +232,27 @@ jobs:
           bench/diagnose.sh data/12302019.NASDAQ_ITCH50
           cat results/diagnose/DIAGNOSE.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Version 2 on one host (netns, kernel sockets and AF_XDP)
+        if: ${{ inputs.mode == 'net' }}
+        env:
+          RATE: ${{ inputs.rate }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          SUDO=$(command -v sudo || true)
+          cmake -S . -B build-net -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF -DFH_ENABLE_XDP=ON
+          cmake --build build-net -j"$(nproc)" --target feed_handler itch_publisher itch_receiver
+          $SUDO env RATE="$RATE" RUNS="$RUNS" OUT="results/v2/net/${{ inputs.instance_type }}" \
+            bench/net_benchmark.sh build-net data/12302019.NASDAQ_ITCH50 results/v2/golden_hashes_12302019.txt
+          $SUDO chown -R "$(id -u):$(id -g)" results/v2/net || true
+          cat "results/v2/net/${{ inputs.instance_type }}/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.mode == 'net' && always() }}
+        with:
+          name: linux-net-${{ github.run_id }}
+          path: results/v2/net
+          retention-days: 30
+
       - name: Publisher overhead, off vs on (pinned)
         if: ${{ inputs.mode == 'publish' }}
         env:
@@ -274,6 +306,157 @@ jobs:
             results/bug_experiment
           retention-days: 30
 
+  # mode=net2: a second instance receives; the first (start-runner) publishes.
+  start-runner-2:
+    name: Start second EC2 runner (receiver)
+    needs: start-runner
+    if: ${{ inputs.mode == 'net2' }}
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start.outputs.label }}
+      ec2-instance-id: ${{ steps.start.outputs.ec2-instance-id }}
+      publisher-ip: ${{ steps.ips.outputs.publisher }}
+      receiver-ip: ${{ steps.ips.outputs.receiver }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve latest Ubuntu 24.04 AMI
+        id: ami
+        run: |
+          ami=$(aws ssm get-parameter \
+            --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
+            --query Parameter.Value --output text)
+          echo "id=$ami" >> "$GITHUB_OUTPUT"
+
+      - name: Start EC2 runner
+        id: start
+        uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_RUNNER_PAT }}
+          ec2-image-id: ${{ steps.ami.outputs.id }}
+          ec2-instance-type: ${{ inputs.instance_type }}
+          subnet-id: ${{ secrets.AWS_SUBNET_ID }}
+          security-group-id: ${{ secrets.AWS_SECURITY_GROUP_ID }}
+          use-jit: true
+          ec2-volume-size: 20
+          ec2-volume-type: gp3
+          startup-timeout-minutes: 20
+          pre-runner-script: |
+            shutdown -h +180 "itch benchmark safety timeout" || true
+          aws-resource-tags: >
+            [
+              {"Key": "Name", "Value": "itch-benchmark-runner-2"},
+              {"Key": "Project", "Value": "itch-feed-handler-benchmark"},
+              {"Key": "GitHubRepository", "Value": "${{ github.repository }}"},
+              {"Key": "GitHubRunId", "Value": "${{ github.run_id }}"}
+            ]
+
+      - name: Private addresses of both instances
+        id: ips
+        run: |
+          ip() { aws ec2 describe-instances --instance-ids "$1" \
+                   --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text; }
+          pub=$(ip "${{ needs.start-runner.outputs.ec2-instance-id }}")
+          rx=$(ip "${{ steps.start.outputs.ec2-instance-id }}")
+          echo "publisher $pub, receiver $rx"
+          echo "publisher=$pub" >> "$GITHUB_OUTPUT"
+          echo "receiver=$rx" >> "$GITHUB_OUTPUT"
+
+  net2-receiver:
+    name: net2 receiver on ${{ inputs.instance_type }}
+    needs: [start-runner, start-runner-2]
+    runs-on: ${{ needs.start-runner-2.outputs.label }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install toolchain
+        run: |
+          SUDO=$(command -v sudo || true)
+          export DEBIAN_FRONTEND=noninteractive
+          $SUDO apt-get update -q
+          $SUDO apt-get install -y -q build-essential cmake python3 iproute2 ethtool libxdp-dev libbpf-dev clang llvm
+      - name: Build
+        run: |
+          cmake -S . -B build-net -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF -DFH_ENABLE_XDP=ON
+          cmake --build build-net -j"$(nproc)" --target itch_receiver
+      - name: Receive every run of the plan
+        env:
+          RATE: ${{ inputs.rate }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO env RATE="$RATE" RUNS="$RUNS" OUT="results/v2/net2/${{ inputs.instance_type }}" \
+            bench/net_two_host.sh receive build-net results/v2/golden_hashes_12302019.txt \
+            "${{ needs.start-runner-2.outputs.publisher-ip }}"
+          $SUDO chown -R "$(id -u):$(id -g)" results/v2/net2 || true
+          cat "results/v2/net2/${{ inputs.instance_type }}/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: linux-net2-${{ github.run_id }}
+          path: results/v2/net2
+          retention-days: 30
+
+  net2-publisher:
+    name: net2 publisher on ${{ inputs.instance_type }}
+    needs: [start-runner, start-runner-2]
+    runs-on: ${{ needs.start-runner.outputs.label }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install toolchain
+        run: |
+          SUDO=$(command -v sudo || true)
+          export DEBIAN_FRONTEND=noninteractive
+          $SUDO apt-get update -q
+          $SUDO apt-get install -y -q build-essential cmake curl python3
+      - name: Download the Nasdaq ITCH day (3.5 GB)
+        run: |
+          mkdir -p data
+          curl -fSL --retry 5 --retry-delay 10 -o data/12302019.NASDAQ_ITCH50.gz \
+            "https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz"
+          gunzip -f data/12302019.NASDAQ_ITCH50.gz
+      - name: Build
+        run: |
+          cmake -S . -B build-net -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF
+          cmake --build build-net -j"$(nproc)" --target itch_publisher
+      - name: Publish every run of the plan
+        env:
+          RATE: ${{ inputs.rate }}
+          RUNS: ${{ inputs.runs }}
+        # If this waits forever, the security group does not let the two
+        # instances reach each other on TCP 31900 (docs/AWS_BENCHMARK.md).
+        timeout-minutes: 150
+        run: |
+          bench/net_two_host.sh publish build-net data/12302019.NASDAQ_ITCH50 \
+            "${{ needs.start-runner-2.outputs.receiver-ip }}"
+
+  open-pr-net:
+    name: Open pull request with Version 2 results
+    needs: [benchmark, net2-receiver]
+    if: ${{ always() && ((inputs.mode == 'net' && needs.benchmark.result == 'success') || (inputs.mode == 'net2' && needs.net2-receiver.result == 'success')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-${{ inputs.mode }}-${{ github.run_id }}
+          path: results/v2/${{ inputs.mode }}
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GH_RUNNER_PAT }}
+          branch: benchmark/${{ inputs.mode }}-${{ github.run_id }}
+          base: main
+          add-paths: results/v2/${{ inputs.mode }}
+          commit-message: "Version 2 ${{ inputs.mode }} results (${{ inputs.instance_type }}, run ${{ github.run_id }})"
+          title: "Version 2 ${{ inputs.mode == 'net2' && 'two-host' || 'one-host' }} results: ${{ inputs.instance_type }}"
+          body-path: results/v2/${{ inputs.mode }}/${{ inputs.instance_type }}/SUMMARY.md
+          delete-branch: true
+
   open-pr:
     name: Open pull request with results
     needs: benchmark
@@ -305,7 +488,7 @@ jobs:
 
   stop-runner:
     name: Terminate EC2 runner
-    needs: [start-runner, benchmark]
+    needs: [start-runner, start-runner-2, benchmark, net2-receiver, net2-publisher]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -323,6 +506,16 @@ jobs:
           github-token: ${{ secrets.GH_RUNNER_PAT }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+
+      - name: Stop second EC2 runner (net2)
+        if: ${{ needs.start-runner-2.outputs.ec2-instance-id != '' }}
+        continue-on-error: true
+        uses: machulav/ec2-github-runner@343a1b2ae682e681c3cec9a235d882da17ff04ef # v2.6.1
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_RUNNER_PAT }}
+          label: ${{ needs.start-runner-2.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner-2.outputs.ec2-instance-id }}
 
       # Backstop: terminate anything this run launched, even if the start step
       # failed after creating the instance (its id would then be unknown).

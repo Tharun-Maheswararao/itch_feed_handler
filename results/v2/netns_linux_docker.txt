@@ -1,0 +1,160 @@
+# Version 2 on one Linux host: bench/netns_feed.sh, publisher and receiver in two network
+# namespaces joined by a veth pair, lines A and B on multicast groups 239.1.1.1 and 239.1.1.2.
+# Host: Docker Desktop on an Apple M4 (arm64 Linux 6.10.14-linuxkit), unpinned, gcc-14 Release.
+# Feed: feed_handler gen --events 3000000 --seed 7 --stocks 64 at 1 M msgs/s; golden file from golden_hashes.
+# Not a benchmark host: the medians repeat between runs, the tails do not (see DESIGN.md 17.5).
+
+## Run 1 (summary lines)
+udp_clean   PASS  gaps 0                                 wire to book p50 2.88 us, p99 1114.11 us
+udp_loss    PASS  gaps 184: 39 other line, 145 re-request  p50 2.75 us, p99 3604.48 us; re-request p50 1703.9 us
+udp_late    PASS  gaps 1: snapshot (8.6 ms)              p50 2.50 us, p99 753.66 us
+xdp_clean   PASS  gaps 0                                 p50 1.82 us, p99 9.47 us
+xdp_loss    PASS  gaps 129: 129 re-request               p50 1.82 us, p99 1802.24 us
+dpdk_clean  PASS  gaps 0                                 p50 1.73 us, p99 11.78 us (after the affinity fix)
+
+## Run 2 (full receiver reports)
+
+=== udp_clean (exit 0)
+receiver: kernel UDP sockets (recvmmsg), 3.19 s, stopped: end of session
+  packets A 71497, B 71496, recovered 0; heartbeats 0, end of session 1
+  gaps 0: filled by the other line 0, by re-request 0, by snapshot 0
+  recovery: 0 requests, 0 re-requests sent, 0 retries, 0 exhausted, 0 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (kernel software receive timestamp, 181111 samples): p50 2.43 us, p90 3.65, p99 6.91, p99.9 1441.79, max 2485.83
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== udp_loss (exit 0)
+receiver: kernel UDP sockets (recvmmsg), 3.15 s, stopped: end of session
+  packets A 70867, B 70849, recovered 655; heartbeats 0, end of session 1
+  gaps 165: filled by the other line 21, by re-request 144, by snapshot 0
+    other line: open p50 0.7 us, p99 1.4 us
+    re-request: recovery time p50 1572.9 us, p99 2621.4 us, max 3317.5 us
+  recovery: 150 requests, 160 re-requests sent, 0 retries, 0 exhausted, 655 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (kernel software receive timestamp, 179476 samples): p50 2.62 us, p90 6.14, p99 1736.70, p99.9 2424.83, max 3393.71
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== udp_late_join_line_a_dies (exit 0)
+receiver: kernel UDP sockets (recvmmsg), 3.15 s, stopped: end of session
+  packets A 37000, B 68497, recovered 0; heartbeats 0, end of session 1
+  gaps 1: filled by the other line 0, by re-request 0, by snapshot 1
+    snapshot: recovery time p50 9.4 ms, max 9.4 ms
+  recovery: 1 requests, 0 re-requests sent, 0 retries, 0 exhausted, 0 packets recovered; snapshots 1 loaded, 0 discarded, 0 failed (0.2 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (kernel software receive timestamp, 173576 samples): p50 3.20 us, p90 54.27, p99 5898.24, p99.9 14680.06, max 16681.67
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== xdp_clean (exit 0)
+receiver: AF_XDP (copy mode, generic XDP on vrx queue 0), 3.18 s, stopped: end of session
+  packets A 71497, B 71496, recovered 0; heartbeats 0, end of session 1
+  gaps 0: filled by the other line 0, by re-request 0, by snapshot 0
+  recovery: 0 requests, 0 re-requests sent, 0 retries, 0 exhausted, 0 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (user-space poll timestamp, 181111 samples): p50 1.89 us, p90 3.97, p99 2883.58, p99.9 14942.21, max 16000.92
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== xdp_loss (exit 0)
+receiver: AF_XDP (copy mode, generic XDP on vrx queue 0), 3.28 s, stopped: end of session
+  packets A 70454, B 70416, recovered 344; heartbeats 0, end of session 1
+  gaps 132: filled by the other line 0, by re-request 132, by snapshot 0
+    re-request: recovery time p50 1736.7 us, p99 2687.0 us, max 4349.7 us
+  recovery: 141 requests, 146 re-requests sent, 1 retries, 0 exhausted, 344 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (user-space poll timestamp, 180239 samples): p50 1.85 us, p90 3.77, p99 1900.54, p99.9 2621.44, max 4355.50
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== dpdk_clean (exit 0)
+receiver: DPDK (net_af_packet, port 0), 3.21 s, stopped: end of session
+  packets A 71134, B 71134, recovered 932; heartbeats 0, end of session 1
+  gaps 2: filled by the other line 0, by re-request 2, by snapshot 0
+    re-request: recovery time p50 3276.8 us, p99 3276.8 us, max 19810.1 us
+  recovery: 3 requests, 21 re-requests sent, 3 retries, 0 exhausted, 932 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (user-space poll timestamp, 180174 samples): p50 1.73 us, p90 3.33, p99 33030.14, p99.9 46137.34, max 46578.71
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+=== dpdk_loss (exit 0)
+receiver: DPDK (net_af_packet, port 0), 3.14 s, stopped: end of session
+  packets A 70638, B 70623, recovered 152; heartbeats 0, end of session 1
+  gaps 138: filled by the other line 0, by re-request 138, by snapshot 0
+    re-request: recovery time p50 1703.9 us, p99 2621.4 us, max 3062.6 us
+  recovery: 151 requests, 151 re-requests sent, 0 retries, 0 exhausted, 152 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (user-space poll timestamp, 180717 samples): p50 1.85 us, p90 10.24, p99 2359.30, p99.9 11010.05, max 11299.46
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (11 of 11)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
+
+
+## bench/net_benchmark.sh on the same feed (RUNS=1)
+# Version 2 results: nb
+
+Paced at 1 M msgs/s; latency is the median of the clean runs' percentiles; every run is checked against the golden model.
+
+| Path | Timestamp source | p50 | p99 | p99.9 | Max | Messages/s | Book match after loss |
+|---|---|---:|---:|---:|---:|---:|---|
+| File replay (Version 1, parse to book) | cycle counter (cntvct_el0) | 0.21 µs | 71.96 µs | 3.58 ms | 4.03 ms | 1.05 M | reference |
+| Kernel sockets (one host, veth, multicast) | kernel software receive | 2.43 µs | 7.29 µs | 2.16 ms | 2.64 ms | 1.00 M | PASS: 13 gaps (0 other line, 13 re-request, 0 snapshot) |
+| AF_XDP (one host, veth, multicast) | user-space poll | 1.76 µs | 12.54 µs | 1.47 ms | 2.48 ms | 1.00 M | PASS: 13 gaps (0 other line, 13 re-request, 0 snapshot) |
+
+## kernel UDP sockets (recvmmsg)
+
+| Run | Passed | p50 | p99 | p99.9 | Max | Messages/s | Gaps | Kernel/NIC drops |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| clean 1 | yes | 2.43 µs | 7.29 µs | 2.16 ms | 2.64 ms | 1.00 M | 0 | 0 |
+| seeded loss | yes | 2.50 µs | 466.94 µs | 2.06 ms | 2.49 ms | 1.00 M | 13 | 0 |
+
+Re-request recovery time: p50 2.10 ms, p99 2.46 ms; 13 packets recovered. Checkpoints: 11 of 11 matched (level digest and queue order), final book matches. Heap allocations after warmup: 0.
+
+Full speed: 16.65 M msgs/s received, 5 gaps (5 re-requested, 0 snapshot), 76272 kernel/NIC drops, book verified.
+
+## AF_XDP (copy mode, generic XDP on vrx queue 0)
+
+| Run | Passed | p50 | p99 | p99.9 | Max | Messages/s | Gaps | Kernel/NIC drops |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| clean 1 | yes | 1.76 µs | 12.54 µs | 1.47 ms | 2.48 ms | 1.00 M | 0 | 0 |
+| seeded loss | yes | 1.63 µs | 196.61 µs | 1.74 ms | 2.52 ms | 1.00 M | 13 | 0 |
+
+Re-request recovery time: p50 1.51 ms, p99 1.90 ms; 13 packets recovered. Checkpoints: 11 of 11 matched (level digest and queue order), final book matches. Heap allocations after warmup: 0.
+
+Full speed: 15.55 M msgs/s received, 1 gaps (1 re-requested, 0 snapshot), 53178 kernel/NIC drops, book verified.

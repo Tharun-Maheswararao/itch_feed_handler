@@ -85,11 +85,11 @@ moving code that Stages A and B depend on.
 | `include/fh/book/` | golden and fast aggregated books; **new** `fifo_book.hpp` (order level), `golden_fifo_book.hpp` (its reference), `pool.hpp`, `fixed_hash_map.hpp`, order-level hash | C0 |
 | `include/fh/queue/` | SPSC ring and Stage B baselines | Version 1 |
 | `include/fh/stats/` | clock, histogram, report; **new** `alloc_counter.hpp` | C0 |
-| `include/fh/mold/` | MoldUDP64 encoder and decoder | C1 |
-| `include/fh/net/` | receive paths behind one interface (`recvmmsg`, AF_XDP, DPDK) | C2, C4 |
-| `include/fh/arb/` | arbiter, gap detector, reorder buffer | C2, C3 |
-| `include/fh/recovery/` | retransmit client and server, snapshot client and server | C3 |
-| `tools/` | `itch_publisher`, `golden_hashes` (checkpoint hashes from the file replay) | C0, C1 |
+| `include/fh/mold/` | MoldUDP64 encoder and decoder, sequence index, seeded loss, replay publisher | C1 ✅ |
+| `include/fh/net/` | receive paths behind one interface (`recvmmsg`, AF_XDP, DPDK), receiver | C2, C4 ✅ |
+| `include/fh/arb/` | arbiter, gap detector, reorder buffer | C2, C3 ✅ |
+| `include/fh/recovery/` | retransmit client and server, snapshot client and server | C3 ✅ |
+| `tools/` | `itch_publisher`, `itch_receiver`, `golden_hashes` (checkpoint hashes from the file replay) | C0, C1 ✅ |
 | `tests/`, `bench/`, `docs/` | as in Version 1, extended per stage | all |
 
 The common receive interface is the key design choice. Every transport
@@ -462,13 +462,24 @@ Setup steps go in `docs/AWS_BENCHMARK.md` as they are added.
 |---|---|---|
 | Oct 29 to Oct 30 ✅ | C0 | FIFO book, allocation counter at zero, golden hash file: **done** ([results](../results/v2/fifo_check_m4.txt)) |
 | Nov 5 ✅ | v1.1 | side task in the slack C0 left: book snapshots over ZeroMQ + Protobuf ([DESIGN.md section 16](DESIGN.md#16-version-11-publishing-the-book-over-the-network)); not part of Stage C |
-| Nov 23 to Nov 29 | C1 | publisher with loss injection, round-trip test passing (Thanksgiving week: lighter days) |
-| Nov 30 to Dec 6 | C2 | kernel receiver, arbitration, clean runs on one host and across AWS |
-| Dec 7 to Dec 17 | C3 | full recovery test matrix passing in CI, including snapshot resync |
-| Dec 18 to Dec 31 | C4 | AF_XDP, DPDK if time allows, results table and chart |
+| Nov 18 ✅ | C1 | publisher with loss injection, round-trip test passing ([test_mold](../tests/test_mold.cpp)) |
+| Nov 18 ✅ | C2 | kernel receiver, arbitration, clean run on one host: full Nasdaq day over the network, 251 of 251 checkpoints ([log](../results/v2/c2_full_day_loopback_m4.txt)); across AWS: workflow mode `net2`, not yet run |
+| Nov 18 ✅ | C3 | full recovery test matrix passing in CI (10 rows × 3 seeds, [test_net](../tests/test_net.cpp)), including snapshot resync and late join |
+| Nov 18 ✅ | C4 | AF_XDP and DPDK (functional) behind the same receive interface, verified in CI; EC2 results table: workflow modes `net` and `net2`, not yet run |
 | early January | polish | README, résumé bullet, interview drill |
 
 If finals squeeze C3: cut DPDK, never cut recovery testing.
+
+**Where the build departs from this plan** (all in
+[DESIGN.md section 17](DESIGN.md#17-version-2-the-network-path-stages-c1-to-c4)):
+
+| Plan | Built | Why |
+|---|---|---|
+| three load levels: original pace, 10× pace, full speed | a fixed rate (2 M msgs/s, about the opening burst) and full speed | the day at original pace takes 16 hours; a fixed rate is also what every Version 1 latency figure uses |
+| DPDK on EC2 with a second ENI bound to `vfio-pci` | DPDK receive path verified through DPDK's `af_packet` device in CI; ENA numbers are future work | the three-day time box: the runner action cannot attach a second interface, and binding the only one would cut off SSH and the runner |
+| two hosts in a cluster placement group | two instances in the same subnet (`net2` mode) | the runner action has no placement-group input; latency between them is reported as measured |
+| GLIMPSE-like snapshot | the same, plus the book-message count and chained level digest at the snapshot point | lets every golden checkpoint after a snapshot be checked in full, not only the final book |
+| hardware receive stamps where available | `--hw-timestamps` asks for them; every result names its source | EC2's ENA has no hardware stamping, so EC2 rows are software or poll stamps, labelled |
 
 Also due in late December: the GitHub token used by the EC2 workflow expires
 around December 30, so renew it before the C4 runs.

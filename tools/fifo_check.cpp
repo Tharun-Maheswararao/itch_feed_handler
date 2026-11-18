@@ -22,7 +22,7 @@
 #include "fh/util/platform.hpp"
 #include "fh/parser/parser.hpp"
 #include "fh/stats/alloc_counter.hpp"
-#include "golden_hashes.hpp"
+#include "fh/verify/golden_hashes.hpp"
 
 using namespace fh;
 using clk = std::chrono::steady_clock;

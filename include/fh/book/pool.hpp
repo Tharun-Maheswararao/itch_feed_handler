@@ -32,6 +32,14 @@ public:
 
     void release(uint32_t h) noexcept { free_[top_++] = h; }
 
+    // Every handle free again, in the same order as after construction. No
+    // allocation: the free list already has room for all of them.
+    void reset() noexcept {
+        const uint32_t cap = capacity();
+        for (uint32_t i = 0; i < cap; ++i) free_[i] = cap - i;
+        top_ = cap;
+    }
+
     T& operator[](uint32_t h) noexcept { return nodes_[h]; }
     const T& operator[](uint32_t h) const noexcept { return nodes_[h]; }
 

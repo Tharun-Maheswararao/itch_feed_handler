@@ -142,6 +142,20 @@ public:
         add(new_ref, o.locate, o.side, price, shares);
     }
 
+    // Empty the book in place (snapshot recovery): every pool, the order map
+    // and the stock directory start over. Nothing allocates; statistics
+    // counters keep counting.
+    void clear() {
+        orders_.reset();
+        levels_.reset();
+        windows_.reset();
+        map_.clear();
+        std::fill(sides_.begin(), sides_.end(), SideBook{});
+        for (auto& s : symbols_) s.fill(0);
+        ctr_.live_orders = 0;
+        hash_ = 0;
+    }
+
     // ---- queries ----------------------------------------------------------
 
     uint64_t hash() const { return hash_; }  // Version 1 level hash

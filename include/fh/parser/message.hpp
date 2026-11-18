@@ -22,6 +22,7 @@ enum class MsgType : uint8_t {
     OrderDelete = 'D',
     OrderReplace = 'U',
     EndOfStream = 0xFF,  // sentinel pushed by the parser after the last message
+    SnapshotLoad = 0xFE, // Version 2 receiver: load the recovery snapshot before the next message
 };
 
 enum class Side : uint8_t { Buy = 'B', Sell = 'S' };

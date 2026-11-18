@@ -667,3 +667,224 @@ On the M4 laptop (unpinned, on battery,
 no cost, but p99 varied by more than 10x between runs with publishing off,
 so the laptop could not resolve a 0.2 µs effect at all. The pinned host was
 needed for this answer.
+
+## 17. Version 2: the network path (Stages C1 to C4)
+
+Version 1 read a file. Version 2 puts the same book behind a real network
+path: the file is replayed as MoldUDP64 on two redundant lines, packets are
+lost and recovered, and the order-level book must still come out identical
+to the file replay at every checkpoint. The plan is
+[ROADMAP_V2.md](ROADMAP_V2.md); this section is what was built and why.
+
+```
+publisher host                                   receiver host
+──────────────                                   ─────────────
+ITCH file (mmap) ─> itch_publisher ──line A──┐   ┌─ RxPath: kernel sockets | AF_XDP | DPDK
+                     + seeded loss  ──line B──┼──>│  receiver thread: arbiter, reorder buffer, gap timer
+retransmit server <── re-requests ────────────┼───│      │ SPSC requests        ^ SPSC recovered packets
+snapshot server  ──── book snapshot (TCP) ────┘   │  recovery thread ───────────┘
+                                                  │      │ in-order messages
+                                                  └─ SPSC ring ─> book thread: FifoBook, digest chain,
+                                                                  golden checkpoints, wire-to-book latency
+```
+
+### 17.1 MoldUDP64 and the publisher (C1)
+
+| Choice | Why |
+|---|---|
+| Packets sent straight from the file mapping | a MoldUDP64 message block is a 2-byte length then the message, exactly the ITCH file's framing, so a packet's blocks are a contiguous slice of the file. `sendmsg` with two iovecs (20-byte header, slice) copies nothing in user space |
+| 1,400-byte payload limit | under a standard 1,500-byte MTU with IP and UDP headers, about 40 messages per packet |
+| Loss injection in the publisher, not `tc netem` | deterministic and identical on every host, Mac included. Each packet consumes a fixed number of random draws per line whatever happens to it, so the same seed gives the same drops, and changing line B's settings never shifts line A's decisions (both tested) |
+| Every non-send action logged with its sequence range | tests assert that what a line is missing is exactly what the log says was dropped |
+| Heartbeat when a line is idle for a second, end of session ×3 | a receiver can tell a quiet line from a dead one, and the heartbeat's sequence (the next message) reveals a lost tail |
+
+Checked: decoding every packet and concatenating the blocks reproduces the
+file byte for byte (in memory, and through sockets plus the arbiter with
+`itch_receiver --capture`); the measured send rate is within 5% of the
+requested rate; two runs with the same seed drop the same packets.
+
+### 17.2 Arbitration and the receiver (C2)
+
+One receiver thread polls both lines and arbitrates inline: no locks, no
+extra queue hop. It keeps one number, `expected`:
+
+| Packet `[s, e)` | Action |
+|---|---|
+| `e <= expected` | duplicate (usually the other line): drop |
+| `s < expected < e` | overlap: deliver only the new tail |
+| `s == expected` | deliver, advance, drain the reorder buffer |
+| `s > expected` | gap: copy into the reorder buffer |
+
+The reorder buffer is fixed slots of packet copies, found by sequence modulo
+a message window. A packet beyond the window, or with every slot taken, is
+not stored (counted as overflow); the missing range then runs to the highest
+sequence seen and recovery fetches all of it. A gap is simply `expected <
+highest`, where `highest` is one past the last message known to exist (a
+packet's end, a heartbeat's or end of session's sequence).
+
+A randomised test feeds the arbiter 40 seeds of interleavings (both lines,
+different packing on each, loss, duplicates, late recovery) and requires
+every message exactly once, in order. It found a real bug on its first run:
+two buffered packets with the same first sequence but different lengths
+(the lines pack differently) kept the shorter one, and the messages only
+the longer one covered were never delivered. The fix keeps the one that
+reaches further.
+
+The book thread pops messages from the Version 1 SPSC ring into the
+order-level `FifoBook`, chains Version 1's level hash after every message
+and compares against the golden file at every checkpoint. Wire to book is
+the packet's arrival stamp to `CLOCK_REALTIME` right after the book update,
+on 1 in 16 messages, with the stamp's source on every result:
+
+| Source | When |
+|---|---|
+| hardware (NIC) | `SO_TIMESTAMPING` raw hardware stamp, if the NIC and driver stamp (`--hw-timestamps`; EC2's ENA does not) |
+| kernel software | `SO_TIMESTAMPING` software receive stamp on Linux, `SO_TIMESTAMP` (µs) on macOS |
+| user-space poll | read right after the descriptors are found: AF_XDP and DPDK |
+
+Verification costs latency: the queue-order hash walks the whole book (1–2 M
+orders) at every checkpoint, which stalls the book thread for milliseconds,
+so verification runs and latency runs are separate. Latency runs pass
+`--no-queue-hash`: the level digest, one hash mix per message, is still
+checked at every checkpoint, and the final book's queue order is always
+checked.
+
+The receiver allocates everything before the first packet (book pools,
+rings, reorder buffer, snapshot buffer, capture buffer) and reports heap
+allocations after warmup, which must be zero, with loss and recovery
+included. The first full-day run found one: the stop reason was a
+`std::string`, and "idle with an unfilled gap" is longer than the
+small-string buffer. It is a `const char*` now.
+
+### 17.3 Recovery (C3)
+
+The receiver never blocks on recovery. When a gap has been open for the gap
+timer (500 µs by default, for the other line to fill it first), the
+receiver pushes a request `[expected, gap_end)` into an SPSC ring; the
+recovery thread works on it and hands recovered packets (or "snapshot
+ready") back through a second ring that the receiver checks every loop. The
+receiver publishes `expected` in an atomic so recovery skips what another
+line already filled.
+
+| Step | Detail |
+|---|---|
+| re-request | MoldUDP64 request packets, 2,048 messages each, 8 in flight; the next round goes out as soon as the last one is filled |
+| retry | no progress within the timeout (2 ms, doubling, at most 1 s): retry; 6 retries by default |
+| snapshot | the gap is wider than the threshold (late join), retries ran out (beyond retention, server gone), or there is no retransmit server |
+
+**Retransmit server.** Indexes sequence → file offset at startup (one offset
+per 64 messages, 34 MB for the full day), so any request is answered
+without scanning. It trims requests to 2,048 messages, rate-limits each
+client with a token bucket, never serves what the publisher has not sent,
+and only keeps the newest `--retention` messages; it answers nothing else,
+as a real server would.
+
+**Snapshot server.** A replica `FifoBook` replays the file forward to the
+requested sequence, so a snapshot is exact by construction: the directory,
+then every order, stock by stock and side by side, levels in price order
+and each level in queue order. Loading them with `add()` in stream order
+rebuilds every queue. The snapshot also carries the book-message count and
+Version 1's chained level digest at that point (verification extras, not
+part of Nasdaq's GLIMPSE): with them the book thread resumes the
+per-message digest chain, so every golden checkpoint after a snapshot is
+still checked in full, and only those before it are skipped.
+
+Loading a snapshot is ordered with the stream: the receiver pushes a control
+message into the book ring before it resets the arbiter, so the book thread
+clears the book (`FifoBook::clear()`, which resets the pools and the order
+map in place, no allocation), loads the snapshot, and only then sees the
+buffered messages after it. A snapshot that arrives after the gap was filled
+another way is discarded: loading it would move the book backwards.
+
+Test matrix ([`test_net.cpp`](../tests/test_net.cpp)), every row with three
+loss seeds, over loopback; each must end with every checkpoint matching:
+
+| Scenario | Expected and checked |
+|---|---|
+| 1% loss on line A only | line B fills every gap; zero re-requests |
+| 1% independent loss on both lines | the other line fills most; the rest re-requested |
+| same packets dropped on both lines | filled by re-request |
+| 500 consecutive packets lost on both lines | several rounds of re-requests |
+| gap bigger than the reorder buffer | overflow counted, whole range recovered |
+| duplicates and reordering | each message applied once |
+| retransmit server down for 120 ms | retries with backoff, recovers when it answers |
+| gap older than the server's retention | retries exhausted, snapshot, book matches from there |
+| late join | snapshot straight away; checkpoints before it skipped, all after it match |
+| line A dies for good | the run completes on line B, re-requesting B's own losses |
+
+### 17.4 Kernel bypass (C4)
+
+Every transport implements the same `RxPath` (`poll()` a batch of UDP
+payloads with arrival stamps, `release()` their buffers), so arbitration,
+recovery and the book are shared code and the comparison is fair. The
+virtual call is once per batch.
+
+**AF_XDP** ([`xdp_rx.cpp`](../src/xdp_rx.cpp),
+[`xdp_feed.bpf.c`](../bpf/xdp_feed.bpf.c)). The NIC stays with the kernel.
+The XDP program matches the two line ports (a map the receiver fills) and
+redirects those packets into a UMEM region the process maps; everything
+else (SSH, ARP, the runner, the recovery thread's own UDP socket) goes on to
+the kernel. The receiver busy-polls the receive ring, parses Ethernet, IPv4
+and UDP itself ([`frame.hpp`](../include/fh/net/frame.hpp), tested against
+short, fragmented, optioned and VLAN-tagged frames) and refills the fill
+ring with the same frames on `release()`. Zero-copy if asked for and the
+driver supports it, else copy mode; native XDP if asked for, else generic
+(any driver, including veth). The mode that ran is in every result. One
+socket binds one queue, so on a real NIC all feed packets must land on that
+queue (the two-host script sets the NIC to one channel).
+
+**DPDK** ([`dpdk_rx.cpp`](../src/dpdk_rx.cpp)), time-boxed as planned. A
+poll-mode driver fills mbufs that `rte_eth_rx_burst` returns, with no system
+call and no kernel stack. It works and is verified in CI through DPDK's
+`af_packet` device on the namespace veth (no hugepages, no NIC), which
+proves the code path, not its speed. Real numbers need a second network
+interface bound to `vfio-pci` on bare metal, which the EC2 workflow does not
+create: within the plan's three-day limit, that part is future work.
+`rte_eal_init` pins the calling thread to the main lcore and the book
+thread then inherited that single core (2 ms p50 in the first run, both
+busy loops sharing one core); the receive path restores the original
+affinity after EAL init, and the receiver pins its own threads.
+
+### 17.5 Results so far
+
+Full Nasdaq day over loopback on the M4 (kernel sockets, two lines, 2 M
+msgs/s, unpinned; [log](../results/v2/c2_full_day_loopback_m4.txt)): all
+268,744,780 messages delivered, **251 of 251 checkpoints and the final book
+match the golden file (level digest and queue order)**, zero heap
+allocations after warmup. Wire-to-book p50 4.0 µs; the tail in that run is
+the queue-order verification walks, not the network.
+
+The same day under seeded loss ([log](../results/v2/c3_full_day_loss_m4.txt)):
+0.1% per line, 0.01% on both, a 500-packet burst on both lines, 0.05%
+duplicates and reordering, plus 4,865 packets the kernel dropped on its own
+(a Docker build shared the machine). 2,374 gaps: 1,676 filled by the other
+line within 12 µs (p99), 698 by re-request (5,521 packets, recovery p50
+1.3 ms), no snapshot needed. 251 of 251 checkpoints, the final book and zero
+heap allocations after warmup, as without loss.
+
+Linux, one host, two namespaces, lines on two multicast groups (Docker on
+the M4: arm64, kernel 6.10, unpinned; two separate runs, both in the
+[log](../results/v2/netns_linux_docker.txt)), 3 M-message synthetic feed at
+1 M msgs/s. Every run of every scenario passed against its golden file:
+
+| Path | Scenario | Gaps (other line / re-request / snapshot), run 2 | p50 run 1 / run 2 | p99 run 1 / run 2 |
+|---|---|---|---:|---:|
+| kernel sockets (`recvmmsg`) | clean | 0 | 2.88 / 2.43 µs | 1,114 / 6.9 µs |
+| kernel sockets | 1% per line, 0.2% both, 500-packet burst, duplicates, reordering | 21 / 144 / 0 | 2.75 / 2.62 µs | 3,604 / 1,737 µs |
+| kernel sockets | late join, line A killed | 0 / 0 / 1 | 2.50 / 3.20 µs | 754 / 5,898 µs |
+| AF_XDP (copy, generic XDP on veth) | clean | 0 | 1.82 / 1.89 µs | 9.5 / 2,884 µs |
+| AF_XDP | loss and a 200-packet burst | 0 / 132 / 0 | 1.82 / 1.85 µs | 1,802 / 1,901 µs |
+| DPDK (`af_packet` device) | clean | 0 / 2 / 0 | 1.73 / 1.73 µs | 11.8 / 33,030 µs |
+
+What this does and does not show. The medians repeat to within about 0.5
+µs, and the two bypass paths sit about 0.7 µs below the socket path (with a
+later timestamp, so if anything that understates the difference). The tails
+do not repeat at all: the same configuration's p99 moved by up to 300×
+between runs, in both directions, which is the VM and the unpinned threads,
+not the code. Version 1 measured the same effect (section 7: unpinned Mac
+p99 from 0.5 µs to 193 ms). No conclusion about tails comes from these runs.
+Under loss the tail is the recovery time by construction: a message behind
+a gap waits for the gap.
+
+The pinned EC2 numbers, one host and two hosts, come from the workflow's
+`net` and `net2` modes (docs/AWS_BENCHMARK.md).
