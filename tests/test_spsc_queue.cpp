@@ -62,7 +62,9 @@ TEST(SpscQueue, InterleavedPushPop) {
         for (int k = 0; k < step % 7; ++k)
             if (q.try_push(next_in)) ++next_in;
         for (int k = 0; k < step % 5; ++k)
-            if (q.try_pop(v)) EXPECT_EQ(v, next_out++);
+            if (q.try_pop(v)) {
+                EXPECT_EQ(v, next_out++);
+            }
     }
     while (q.try_pop(v)) EXPECT_EQ(v, next_out++);
     EXPECT_EQ(next_in, next_out);

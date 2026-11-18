@@ -52,7 +52,9 @@ public:
             retries_.fetch_add(1, std::memory_order_relaxed);
         } while (true);
         if (s1 == 0) return false;
-        std::memcpy(&out, buf.data(), sizeof(T));
+        // T is trivially copyable (asserted above); void* only silences
+        // gcc, which warns about any class with member initialisers.
+        std::memcpy(static_cast<void*>(&out), buf.data(), sizeof(T));
         return true;
     }
 

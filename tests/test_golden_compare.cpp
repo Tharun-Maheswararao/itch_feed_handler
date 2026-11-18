@@ -103,7 +103,9 @@ TEST(GoldenCompare, SampledLatencyPipelineMatchesGolden) {
             EXPECT_EQ(rp.depth.count(), rp.total.count());
             EXPECT_EQ(rp.book.count(), rp.total.count());
             EXPECT_EQ(rp.sample_every, every);
-            if (every == 1) EXPECT_EQ(rp.total.count(), rp.book_messages);
+            if (every == 1) {
+                EXPECT_EQ(rp.total.count(), rp.book_messages);
+            }
         }
     }
 }
