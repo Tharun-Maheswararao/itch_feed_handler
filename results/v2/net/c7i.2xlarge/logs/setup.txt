@@ -1,0 +1,1 @@
+cores: publisher 1, receiver 2, book 3; rate 2000000; runs 3

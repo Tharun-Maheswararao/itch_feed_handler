@@ -1,0 +1,32 @@
+retransmit server on port 31003 (268744780 messages indexed, retention all, max 2048 per request)
+snapshot server on port 31004
+publishing data/12302019.NASDAQ_ITCH50 (8251407909 bytes) on A=239.1.1.1:31001 B=239.1.1.2:31002, full speed
+published 268744780 messages in 6049916 packets, 23.75 s, 11316005 msgs/s
+  line A: sent 6049916, dropped 0, duplicated 0, delayed 0
+  line B: sent 6049916, dropped 0, duplicated 0, delayed 0
+  heartbeats 0, send errors 0, loss seed 1
+  retransmit: 3287 requests, 6577126 messages in 190179 packets; trimmed 0, refused (retention) 0, rate limited 0, bad 0
+  snapshots: 2 served (23.3 MB, last at seq 268744780), 0 failed
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libxdp: No bpffs found at /sys/fs/bpf
+libxdp: Can't use dispatcher without a working bpffs
+libxdp: Falling back to loading single prog without dispatcher
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+listening: AF_XDP (copy mode, generic XDP on vrx queue 0), ports A 31001 B 31002
+receiver ready
+receiver: AF_XDP (copy mode, generic XDP on vrx queue 0), 164.47 s, stopped: gap not recovered within the recovery timeout
+  packets A 6002049, B 6002045, recovered 190179; heartbeats 0, end of session 6
+  messages 6449256 (book 6897909); duplicates 157451, overlaps 532, buffered 79854, overflow 11796159
+  gaps 5: filled by the other line 0, by re-request 4, by snapshot 0
+    re-request: recovery time p50 42991.6 us, p99 98566.1 us, max 132217.8 us
+  recovery: 92 requests, 3287 re-requests sent, 150 retries, 0 exhausted, 190179 packets recovered; snapshots 1 loaded, 0 discarded, 0 failed (23.3 MB)
+  kernel drops: path 95744, system-wide 0
+  wire to book (user-space poll timestamp, 236550 samples): p50 24117.25 us, p90 46137.34, p99 77594.62, p99.9 251658.24, max 300351.15
+  complete (every message to end of session)                 FAIL
+  checkpoints match golden (level digest)                    FAIL (5 of 251, 1 before a snapshot)
+  final book matches golden (level digest + queue order)     FAIL
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+FAIL
