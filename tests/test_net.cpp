@@ -60,6 +60,8 @@ struct Scenario {
     recovery::RetransmitConfig rt;
     std::chrono::milliseconds server_down{0};  // retransmit server ignores requests this long after start
     bool server_dead = false;                  // ... or for the whole run
+    std::chrono::milliseconds snapshot_delay{0};  // snapshot server sleeps this long before serving
+    bool snapshot_follow = false;
 };
 
 struct Outcome {
@@ -67,6 +69,7 @@ struct Outcome {
     mold::PublisherStats pub;
     recovery::RetransmitStats rt;
     recovery::SnapshotStats snap;
+    uint64_t replica_seq = 0;
 };
 
 Outcome run(Scenario s) {
@@ -88,7 +91,9 @@ Outcome run(Scenario s) {
         if (s.server_down.count() || s.server_dead) rts->set_down(true);
     }
     if (s.snapshot) {
-        snaps = std::make_unique<recovery::SnapshotServer>(f.bytes.data(), f.bytes.data() + f.bytes.size(), next_seq);
+        snaps = std::make_unique<recovery::SnapshotServer>(f.bytes.data(), f.bytes.data() + f.bytes.size(), next_seq,
+                                                           "127.0.0.1:0", s.snapshot_follow);
+        if (s.snapshot_delay.count()) snaps->set_serve_delay(s.snapshot_delay);
         s.rx.recovery.snapshot = "127.0.0.1:" + std::to_string(snaps->port());
     }
     s.rx.recovery.max_orders = 1u << 20;
@@ -118,6 +123,11 @@ Outcome run(Scenario s) {
         o.rt = rts->stats();
     }
     if (snaps) {
+        if (s.snapshot_follow) {  // give the replica a moment to reach the end
+            for (int i = 0; i < 200 && snaps->replica_seq() < p.next_seq() - 1; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        o.replica_seq = snaps->replica_seq();
         snaps->stop();
         o.snap = snaps->stats();
     }
@@ -357,6 +367,35 @@ TEST(RecoveryLimits, UnrecoverableGapEndsTheRunInsteadOfHanging) {
     EXPECT_STREQ(o.rep.stop_reason, "gap not recovered within the recovery timeout");
     EXPECT_GT(o.rep.recovery.exhausted, 0u);
     EXPECT_LT(secs, 30.0);
+}
+
+// A snapshot server that takes longer to answer than the recovery timeout
+// (on EC2 it replays the whole day first, about 70 s): the download in
+// progress counts as progress, so the receiver waits for it and completes.
+TEST(RecoveryLimits, ASlowSnapshotIsWaitedFor) {
+    Scenario s;
+    s.retransmit = s.snapshot = true;
+    s.snapshot_delay = std::chrono::milliseconds(3000);
+    s.rx.recovery_timeout = std::chrono::milliseconds(1000);
+    s.rx.recovery.snapshot_threshold = 50'000;
+    s.pub.heartbeat = std::chrono::seconds(60);
+    s.pub.loss.drop_ranges.push_back({0, 2999, 3});  // late join
+    const auto o = run(s);
+    expect_verified(o.rep);  // complete, not "gap not recovered within the recovery timeout"
+    // Live data kept arriving during the 3 s, so a second snapshot may follow.
+    EXPECT_GE(o.rep.snapshots_loaded, 1u);
+}
+
+// With follow on, the snapshot replica keeps up with the publisher without
+// any request, so a snapshot at the live edge needs no replay.
+TEST(RecoveryLimits, FollowingReplicaKeepsUpWithThePublisher) {
+    Scenario s;
+    s.snapshot = true;
+    s.snapshot_follow = true;
+    const auto o = run(s);
+    expect_verified(o.rep);
+    EXPECT_EQ(o.snap.served, 0u);
+    EXPECT_EQ(o.replica_seq, o.pub.messages);
 }
 
 INSTANTIATE_TEST_SUITE_P(Seeds, Recovery, ::testing::Values(1, 2, 3));

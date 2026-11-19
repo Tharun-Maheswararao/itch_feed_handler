@@ -39,6 +39,7 @@ struct RecoveryConfig {
     uint32_t inflight = 8;                    // re-requests outstanding at once
     uint32_t max_orders = 4u << 20;           // snapshot buffer capacity
     int snapshot_attempts = 20;               // connection attempts, 50 ms apart
+    std::chrono::seconds snapshot_timeout{600};  // one snapshot fetch, from request to last byte
 
     bool enabled() const { return !retransmit.empty() || !snapshot.empty(); }
 };
@@ -76,6 +77,10 @@ public:
     bool request(const GapRequest& r) { return requests_.try_push(r); }
     bool poll(Recovered& out) { return recovered_.try_pop(out); }
     void publish_expected(uint64_t e) { expected_.store(e, std::memory_order_release); }
+    // A snapshot fetch is under way: the server may be replaying to the
+    // requested sequence and sends nothing until it is done, so the receiver
+    // does not count this time as "no progress". Bounded by snapshot_timeout.
+    bool fetching_snapshot() const { return fetching_.load(std::memory_order_acquire); }
 
     // Book thread, after a Snapshot item: the snapshot bytes, then release.
     const uint8_t* snapshot_data() const { return snap_.data(); }
@@ -100,6 +105,7 @@ private:
     SpscQueue<Recovered, 1024> recovered_;
     std::vector<uint8_t> snap_;
     std::atomic<bool> snap_busy_{false};
+    std::atomic<bool> fetching_{false};
     std::atomic<uint64_t> expected_{1};
     std::atomic<bool> stop_{false};
     std::thread thread_;

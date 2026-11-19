@@ -282,8 +282,11 @@ ReceiverReport run_receiver(RxPath& path, const ReceiverConfig& cfg, const std::
             // any packet, from the lines or from recovery; otherwise
             // idle_timeout. Sending a request is not progress: if the
             // servers are gone, every request fails at once, and counting
-            // them would keep the receiver waiting for ever.
+            // them would keep the receiver waiting for ever. A snapshot
+            // download in progress does count (the server sends nothing
+            // while it replays); the client's snapshot_timeout bounds it.
             const bool recovering = rec && arbiter->in_gap();
+            if (recovering && rec->fetching_snapshot()) last_packet = now;  // bounded by snapshot_timeout
             if (any && now - last_packet > (recovering ? cfg.recovery_timeout : cfg.idle_timeout)) {
                 rep.stop_reason = arbiter->in_gap() ? (recovering ? "gap not recovered within the recovery timeout"
                                                                   : "idle with an unfilled gap")
@@ -407,7 +410,7 @@ void write_json(const ReceiverReport& r, std::FILE* out) {
                  "\"p999_ns\": %llu, \"max_ns\": %llu, \"gaps\": %llu, \"gaps_by_line\": %llu, "
                  "\"gaps_by_retransmit\": %llu, \"gaps_by_snapshot\": %llu, \"recovery_p50_ns\": %llu, "
                  "\"recovery_p99_ns\": %llu, \"packets_recovered\": %llu, \"duplicates\": %llu, \"overflow\": %llu, "
-                 "\"checkpoints\": %llu, \"checkpoints_matched\": %llu, \"checkpoints_skipped\": %llu, "
+                 "\"snapshots_loaded\": %llu, \"checkpoints\": %llu, \"checkpoints_matched\": %llu, \"checkpoints_skipped\": %llu, "
                  "\"final_match\": %s, \"queue_order_checked\": %s, \"kernel_drops\": %llu, \"system_drops\": %lld, "
                  "\"allocations_after_warmup\": %lld}\n",
                  r.transport.c_str(), ts_source_name(r.ts_source()), r.passed() ? "true" : "false",
@@ -420,7 +423,8 @@ void write_json(const ReceiverReport& r, std::FILE* out) {
                  (unsigned long long)r.gaps_by_line, (unsigned long long)r.gaps_by_retransmit,
                  (unsigned long long)r.gaps_by_snapshot, (unsigned long long)r.retransmit_fill_ns.percentile(0.5),
                  (unsigned long long)r.retransmit_fill_ns.percentile(0.99), (unsigned long long)r.recovery.packets,
-                 (unsigned long long)a.duplicates, (unsigned long long)a.overflow, (unsigned long long)r.checkpoints,
+                 (unsigned long long)a.duplicates, (unsigned long long)a.overflow,
+                 (unsigned long long)r.snapshots_loaded, (unsigned long long)r.checkpoints,
                  (unsigned long long)r.checkpoints_matched, (unsigned long long)r.checkpoints_skipped,
                  r.final_match ? "true" : "false", r.queue_order_checked ? "true" : "false",
                  (unsigned long long)r.path_drops, (long long)r.system_drops,

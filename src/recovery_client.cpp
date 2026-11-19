@@ -102,16 +102,26 @@ void RecoveryClient::drain_responses() {
 
 bool RecoveryClient::fetch_snapshot(uint64_t min_seq) {
     if (snap_.empty()) return false;
+    struct Flag {  // set for the whole fetch, cleared on every return
+        std::atomic<bool>& f;
+        explicit Flag(std::atomic<bool>& x) : f(x) { f.store(true, std::memory_order_release); }
+        ~Flag() { f.store(false, std::memory_order_release); }
+    } flag(fetching_);
+    const auto deadline = clk::now() + cfg_.snapshot_timeout;
     // The book thread may still be loading the previous snapshot.
     while (snap_busy_.load(std::memory_order_acquire)) {
-        if (stop_.load(std::memory_order_relaxed)) return false;
+        if (stop_.load(std::memory_order_relaxed) || clk::now() > deadline) return false;
         std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
     for (int attempt = 0; attempt < cfg_.snapshot_attempts && !stop_.load(std::memory_order_relaxed); ++attempt) {
         if (attempt) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const auto left = std::chrono::duration_cast<std::chrono::seconds>(deadline - clk::now()).count();
+        if (left <= 0) break;
         const int c = socket(AF_INET, SOCK_STREAM, 0);
         if (c < 0) continue;
-        timeval tv{120, 0};  // the server may replay a long way to reach min_seq
+        // The server may replay a long way to reach min_seq before it sends
+        // the first byte: allow it the rest of the deadline.
+        timeval tv{static_cast<decltype(tv.tv_sec)>(left), 0};
         setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         uint8_t req[kSnapRequestLen];
         std::memcpy(req, kSnapRequest, 4);

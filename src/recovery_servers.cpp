@@ -189,6 +189,9 @@ struct SnapshotServer::Impl {
     std::unique_ptr<FifoBook<true>> book = std::make_unique<FifoBook<true>>();
     const uint8_t* p;
     uint64_t seq_done = 0, book_msgs = 0, digest = 0;
+    std::atomic<uint64_t> replica_seq{0};
+    std::atomic<int64_t> delay_ms{0};
+    bool follow = false;
     ParseStats ps;
     Msg m{};
     std::vector<uint8_t> out;
@@ -207,6 +210,7 @@ struct SnapshotServer::Impl {
             p += 2 + len;
             ++seq_done;
         }
+        replica_seq.store(seq_done, std::memory_order_relaxed);
     }
 
     void serialize() { write_snapshot(*book, SnapshotHeader{seq_done, book_msgs, digest, 0, 0}, out); }
@@ -255,6 +259,8 @@ struct SnapshotServer::Impl {
             const uint64_t published = next_seq() - 1;
             target = std::min(target, std::max(published, seq_done));
             advance_to(target);
+            if (const int64_t d = delay_ms.load(std::memory_order_relaxed))
+                std::this_thread::sleep_for(std::chrono::milliseconds(d));
             serialize();
             if (write_all(c, out.data(), out.size())) {
                 ++s.served;
@@ -272,7 +278,14 @@ struct SnapshotServer::Impl {
     void run() {
         pollfd pf{fd, POLLIN, 0};
         while (!stopping.load(std::memory_order_relaxed)) {
-            if (::poll(&pf, 1, 20) <= 0) continue;
+            if (::poll(&pf, 1, follow ? 0 : 20) <= 0) {
+                // No request waiting: follow the publisher, in steps of 64 K
+                // messages (a few ms) so a request never waits long.
+                const uint64_t published = next_seq() - 1;
+                if (follow && seq_done < published) advance_to(std::min(published, seq_done + (uint64_t{1} << 16)));
+                else if (follow) ::poll(&pf, 1, 5);
+                continue;
+            }
             const int c = accept(fd, nullptr, nullptr);
             if (c < 0) continue;
             serve(c);
@@ -282,8 +295,9 @@ struct SnapshotServer::Impl {
 };
 
 SnapshotServer::SnapshotServer(const uint8_t* data, const uint8_t* end, std::function<uint64_t()> next_seq,
-                               const std::string& listen)
+                               const std::string& listen, bool follow)
     : impl_(std::make_unique<Impl>(data, end, std::move(next_seq))) {
+    impl_->follow = follow;
     const net::Endpoint ep = net::parse_endpoint(listen);
     impl_->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (impl_->fd < 0) throw std::runtime_error("snapshot server: socket");
@@ -308,5 +322,7 @@ SnapshotStats SnapshotServer::stats() const {
     std::lock_guard lk(impl_->mu);
     return impl_->st;
 }
+uint64_t SnapshotServer::replica_seq() const { return impl_->replica_seq.load(std::memory_order_relaxed); }
+void SnapshotServer::set_serve_delay(std::chrono::milliseconds d) { impl_->delay_ms = d.count(); }
 
 }  // namespace fh::recovery

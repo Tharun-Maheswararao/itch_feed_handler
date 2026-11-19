@@ -10,11 +10,14 @@
 //
 // SnapshotServer serves the order-level book as of a sequence number over
 // TCP (snapshot.hpp). It keeps one replica book that replays the file
-// forward to whatever a request needs, so each snapshot is exact by
-// construction.
+// forward, so each snapshot is exact by construction. With `follow`, the
+// replica also keeps up with what the publisher has sent between requests,
+// so a snapshot near the live edge is ready at once instead of after
+// replaying the day (the cost: a thread busy replaying all the time).
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -64,10 +67,12 @@ class SnapshotServer {
 public:
     // `next_seq` bounds a snapshot to what the publisher has sent.
     SnapshotServer(const uint8_t* data, const uint8_t* end, std::function<uint64_t()> next_seq,
-                   const std::string& listen = "127.0.0.1:0");
+                   const std::string& listen = "127.0.0.1:0", bool follow = false);
     ~SnapshotServer();
     uint16_t port() const;
     SnapshotStats stats() const;
+    uint64_t replica_seq() const;                   // last message the replica has applied
+    void set_serve_delay(std::chrono::milliseconds d);  // tests: a slow server
     void stop();
 
 private:

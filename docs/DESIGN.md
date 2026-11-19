@@ -811,6 +811,22 @@ ends well before the power-off so logs and partial results always upload,
 and `RecoveryLimits.UnrecoverableGapEndsTheRunInsteadOfHanging` checks that
 a gap nothing can fill ends the run within seconds.
 
+The second EC2 run found the opposite case. At full speed the publisher sent
+the day at 11.3 M msgs/s, far more than a 4-core host can take, so the
+receiver fell back to a snapshot, and the snapshot server first replays the
+file up to the requested sequence (about 70 s for most of the day on that
+host) before it sends a byte. Those 70 s without a packet ran into the
+120 s recovery timeout once the publisher had finished. A snapshot download
+in progress now counts as progress, bounded by its own `snapshot_timeout`
+(10 minutes; `RecoveryLimits.ASlowSnapshotIsWaitedFor`). Separately,
+`itch_publisher --snapshot-follow` keeps the replica at the live edge
+between requests, so snapshots need no replay, at the cost of a thread
+replaying all the time; it is off by default so it cannot disturb latency
+runs on small hosts. The same run's AF_XDP ring (4 K entries) overflowed
+whenever the book thread paused to walk the queues for verification (1.4 M
+drops, all recovered); the default is now 16 K entries over a 64 MB UMEM,
+about what the socket path's 64 MB receive buffer holds.
+
 Test matrix ([`test_net.cpp`](../tests/test_net.cpp)), every row with three
 loss seeds, over loopback; each must end with every checkpoint matching:
 

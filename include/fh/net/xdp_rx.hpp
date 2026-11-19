@@ -29,9 +29,13 @@ struct XdpRxConfig {
     uint32_t group[2] = {0, 0};  // multicast group per line, host order (joined so the NIC accepts it)
     bool native = false;         // native (driver) XDP instead of generic
     bool zero_copy = false;      // try zero-copy first
-    uint32_t frames = 8192;
+    // 32 K frames (64 MB UMEM) and a 16 K-entry ring hold about as much as
+    // the socket path's 64 MB receive buffer. With 8 K / 4 K the ring
+    // overflowed whenever the book thread paused to walk the queues for
+    // verification (1.4 M drops in one EC2 run, all recovered).
+    uint32_t frames = 32768;
     uint32_t frame_size = 2048;
-    uint32_t ring = 4096;        // RX ring entries
+    uint32_t ring = 16384;       // RX ring entries
     std::string bpf_object;      // compiled xdp_feed.bpf.o (default: the one CMake built)
 };
 

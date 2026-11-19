@@ -21,6 +21,8 @@
 //   --retention N                   only the newest N messages can be re-sent
 //   --max-request N                 messages per request (default 2048)
 //   --snapshot-listen HOST:PORT     serve order-level book snapshots (TCP)
+//   --snapshot-follow               keep the snapshot replica at the live edge (one busy thread),
+//                                   so snapshots need no replay
 //   --linger-ms N                   keep serving after the end of session (default 3000);
 //                                   SIGINT or SIGTERM ends the linger early
 #include <atomic>
@@ -76,6 +78,7 @@ int main(int argc, char** argv) {
     std::string log_path, retransmit_listen, snapshot_listen;
     recovery::RetransmitConfig rt;
     long linger_ms = 3000;
+    bool snapshot_follow = false;
     try {
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
@@ -110,6 +113,7 @@ int main(int argc, char** argv) {
             else if (a == "--retention") rt.retention = std::stoull(val());
             else if (a == "--max-request") rt.max_count = static_cast<uint32_t>(std::stoul(val()));
             else if (a == "--snapshot-listen") snapshot_listen = val();
+            else if (a == "--snapshot-follow") snapshot_follow = true;
             else if (a == "--linger-ms") linger_ms = std::stol(val());
             else return usage();
         }
@@ -131,7 +135,8 @@ int main(int argc, char** argv) {
                         rt.retention == UINT64_MAX ? "all" : std::to_string(rt.retention).c_str(), rt.max_count);
         }
         if (!snapshot_listen.empty()) {
-            snaps = std::make_unique<recovery::SnapshotServer>(f.data(), f.end(), next_seq, snapshot_listen);
+            snaps = std::make_unique<recovery::SnapshotServer>(f.data(), f.end(), next_seq, snapshot_listen,
+                                                               snapshot_follow);
             std::printf("snapshot server on port %u\n", snaps->port());
         }
         std::signal(SIGINT, on_signal);

@@ -32,6 +32,18 @@ def load(path):
         return json.loads(f.read())
 
 
+def publisher_rate(path):
+    """msgs/s from the publisher's "published N messages in P packets, S s, R msgs/s" line."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("published "):
+                    return float(line.rsplit(",", 1)[1].split()[0])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
 def med(rows, key):
     return statistics.median(r[key] for r in rows)
 
@@ -116,10 +128,18 @@ def main():
         fs_p = os.path.join(R, f"{key}_fullspeed.json")
         if os.path.exists(fs_p):
             fs = load(fs_p)
-            out.append(f"\nFull speed: {fs['msgs_per_sec'] / 1e6:.2f} M msgs/s received, {fs['gaps']} gaps "
-                       f"({fs['gaps_by_retransmit']} re-requested, {fs['gaps_by_snapshot']} snapshot), "
-                       f"{fs['kernel_drops']} kernel/NIC drops, book "
-                       f"{'verified' if fs['passed'] else 'NOT verified'}.")
+            sent = publisher_rate(os.path.join(R, "logs", f"{key}_fullspeed", "publisher.txt"))
+            sent_txt = f"the publisher sent {sent / 1e6:.2f} M msgs/s" if sent else "the publisher sent as fast as it could"
+            how = (f"{fs['gaps']} gaps: {fs['gaps_by_line']} filled by the other line, "
+                   f"{fs['gaps_by_retransmit']} by re-request ({fs['packets_recovered']} packets), "
+                   f"{fs.get('snapshots_loaded', fs['gaps_by_snapshot'])} snapshot loads")
+            if fs["passed"]:
+                verdict = "book verified at every checkpoint after the last snapshot and at the end"
+            else:
+                verdict = f"book NOT verified (stopped: {fs['stop_reason']})"
+            out.append(f"\nFull speed: {sent_txt}; {fs['kernel_drops']} kernel/NIC drops; {how}; {verdict}. "
+                       "This is a stress test of recovery, not a throughput figure: what the receiver "
+                       "could not take directly came from re-requests and snapshots.")
 
     print("\n".join(out))
     return 0
