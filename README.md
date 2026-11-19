@@ -402,7 +402,7 @@ results: [DESIGN.md sections 15 and 17](docs/DESIGN.md#17-version-2-the-network-
 | **C1** | MoldUDP64 replay publisher: packets sent straight from the file mapping, lines A and B, fixed-rate or timestamp pacing, heartbeats, **seeded loss injection** (drops per line and on both, bursts, duplicates, reordering, dead line) | ✅ |
 | **C2** | receiver: one busy-polling thread arbitrates both lines (first copy of each sequence wins, duplicates and overlaps dropped, reorder buffer), wire-to-book timestamps with their source on every result | ✅ |
 | **C3** | gap recovery off the hot path: other line, then MoldUDP64 re-request, then **book snapshot** resync; retransmit server with retention, request caps and per-client rate limits; a 10-row loss test matrix with 3 seeds each in CI | ✅ |
-| **C4** | kernel bypass behind the same receive interface: **AF_XDP** (XDP program redirects only the feed's ports) and **DPDK** (functional, time-boxed) | ✅ code and CI; EC2 numbers: run the `net` / `net2` workflow modes |
+| **C4** | kernel bypass behind the same receive interface: **AF_XDP** (XDP program redirects only the feed's ports) and **DPDK** (functional, time-boxed) | ✅ one-host EC2 table below; two hosts: workflow `mode=net2`, not yet run |
 
 ```
 itch_publisher ──line A (UDP)──┐                    ┌─ kernel sockets | AF_XDP | DPDK
@@ -411,6 +411,37 @@ itch_publisher ──line A (UDP)──┐                    ┌─ kernel sock
   snapshot server ─── book (TCP) ──┘        │ SPSC ring
                                        book thread: FifoBook, digest chain, golden checkpoints
 ```
+
+**Pinned on EC2** (`c7i.2xlarge`, the full Nasdaq day at 2 M msgs/s, publisher
+and receiver in two network namespaces on one host, lines on two multicast
+groups; median of three clean runs;
+[summary](results/v2/net/c7i.2xlarge/SUMMARY.md), workflow `mode=net`):
+
+| Receive path | Timestamp source | p50 | p99 | p99.9 | Book after seeded loss |
+|---|---|---:|---:|---:|---|
+| Version 1 file replay (reference) | cycle counter | 0.47 µs | 4.05 µs | 8.11 µs | reference |
+| kernel sockets (`recvmmsg`) | kernel software receive | 6.78 µs | 16.38 µs | 22.53 µs | **251 of 251 checkpoints**, 3,983 gaps recovered |
+| **AF_XDP** (copy mode, generic XDP) | user-space poll | **4.86 µs** | **13.57 µs** | **19.45 µs** | **251 of 251 checkpoints**, 1,198 gaps recovered |
+
+* **AF_XDP is about 2 µs faster at the median and 3 µs faster at p99 and
+  p99.9**, although its stamp is taken later (after the poll finds the
+  packet), which favours the socket path; the real difference is if
+  anything larger. The three clean runs of each path agree to within
+  0.7 µs at p50, and the socket path reproduced its 6.78 µs p50 exactly
+  on the earlier run (PR 5).
+* **Wire to book costs about 6 µs more than Version 1's parse to book**:
+  that is the network stack, the MoldUDP64 framing and arbitration, and a
+  second clock (CLOCK_REALTIME, not the cycle counter).
+* **The book is right under loss**: 0.1% loss per line, 0.02% on both, a
+  500-packet burst on both, duplicates and reordering, and every checkpoint
+  (level digest after every message, queue order at every checkpoint)
+  matches, with zero heap allocations after warmup. The loss runs' tails
+  (about 150 ms) are the queue-order verification walks and recovery, not
+  the network.
+* **Full speed** (the publisher sends 6–12 M msgs/s, more than a 4-core host
+  receives): hundreds of thousands of packets dropped, filled by re-requests
+  and snapshot resyncs, and the book still matches at the end. A recovery
+  stress test, not a throughput figure.
 
 **The full Nasdaq day over the network** (M4, loopback, two lines, 2 M
 msgs/s, [log](results/v2/c2_full_day_loopback_m4.txt)): all 268,744,780
@@ -443,8 +474,8 @@ configuration's p99 moved by up to 300× between the two runs (AF_XDP clean:
 here should be read as "AF_XDP has the better tail". The timestamp sources
 also differ: the socket rows use the kernel's receive stamp, AF_XDP and DPDK
 a user-space poll stamp, which comes later and so flatters the socket path.
-Pinned EC2 numbers, one host and two hosts, come from the benchmark
-workflow's `net` and `net2` modes ([how](docs/AWS_BENCHMARK.md)).
+The pinned EC2 table above is the measurement; two-host numbers come from
+the workflow's `net2` mode ([how](docs/AWS_BENCHMARK.md)).
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j

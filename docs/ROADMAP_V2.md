@@ -465,7 +465,7 @@ Setup steps go in `docs/AWS_BENCHMARK.md` as they are added.
 | Nov 18 ✅ | C1 | publisher with loss injection, round-trip test passing ([test_mold](../tests/test_mold.cpp)) |
 | Nov 18 ✅ | C2 | kernel receiver, arbitration, clean run on one host: full Nasdaq day over the network, 251 of 251 checkpoints ([log](../results/v2/c2_full_day_loopback_m4.txt)); across AWS: workflow mode `net2`, not yet run |
 | Nov 18 ✅ | C3 | full recovery test matrix passing in CI (10 rows × 3 seeds, [test_net](../tests/test_net.cpp)), including snapshot resync and late join |
-| Nov 18 ✅ | C4 | AF_XDP and DPDK (functional) behind the same receive interface, verified in CI; EC2 results table: workflow modes `net` and `net2`, not yet run |
+| Nov 18–19 ✅ | C4 | AF_XDP and DPDK (functional) behind the same receive interface, verified in CI; one-host EC2 table ([summary](../results/v2/net/c7i.2xlarge/SUMMARY.md)): AF_XDP 4.86 / 13.57 µs p50 / p99 against 6.78 / 16.38 µs for kernel sockets, book verified under loss; two hosts (`net2`): not yet run |
 | early January | polish | README, résumé bullet, interview drill |
 
 If finals squeeze C3: cut DPDK, never cut recovery testing.

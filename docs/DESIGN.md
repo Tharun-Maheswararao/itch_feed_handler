@@ -917,5 +917,31 @@ p99 from 0.5 µs to 193 ms). No conclusion about tails comes from these runs.
 Under loss the tail is the recovery time by construction: a message behind
 a gap waits for the gap.
 
-The pinned EC2 numbers, one host and two hosts, come from the workflow's
-`net` and `net2` modes (docs/AWS_BENCHMARK.md).
+**Pinned on EC2** (`c7i.2xlarge`, 4 physical cores; publisher, receiver
+and book threads on three of them; the full day at 2 M msgs/s; median of
+three clean runs; [summary](../results/v2/net/c7i.2xlarge/SUMMARY.md)):
+
+| Path | Stamp | p50 | p99 | p99.9 | Max (median of runs) |
+|---|---|---:|---:|---:|---:|
+| Version 1 file replay, parse to book | cycle counter | 0.47 µs | 4.05 µs | 8.11 µs | 1.13 ms |
+| kernel sockets, one host | kernel software receive | 6.78 µs | 16.38 µs | 22.53 µs | 153 µs |
+| AF_XDP, one host | user-space poll | 4.86 µs | 13.57 µs | 19.45 µs | 136 µs |
+
+Unlike the laptop VM, the pinned host repeats: each path's three clean runs
+agree within 0.7 µs at p50 and about 2 µs at p99, and the socket path's p50 was
+6.78 µs on two separate runs. AF_XDP saves about 2 µs at p50 and 3 µs at
+p99 and p99.9, although its user-space stamp comes later than the socket
+path's kernel stamp, so the comparison favours sockets. What this setup is
+not: generic (copy-mode) XDP on a veth between two namespaces is a software
+path end to end, with no NIC and no zero-copy, so this is the floor of what
+AF_XDP saves here, not what it saves on a real NIC. That is the two-host
+run's job.
+
+Both loss runs (seeded loss on both lines plus a 500-packet burst) matched
+all 251 checkpoints with queue order and the final book, with zero heap
+allocations; with the 16 K-entry ring, AF_XDP dropped nothing (1.4 M drops
+with the old 4 K ring). Re-request recovery took 1.2 ms at p50 on both paths.
+At full speed (6.4 and 12.4 M msgs/s sent) both paths fell behind, recovered
+by re-request and snapshot resync, and ended with a verified book.
+
+Two-host numbers come from the workflow's `net2` mode (AWS_BENCHMARK.md).
