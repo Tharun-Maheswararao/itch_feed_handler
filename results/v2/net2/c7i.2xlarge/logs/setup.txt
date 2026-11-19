@@ -1,0 +1,31 @@
+interface enp39s0, receiver core 2, book core 3, rate 2000000
+driver: ena
+version: 7.0.0-1017-aws
+firmware-version: 
+expansion-rom-version: 
+bus-info: 0000:27:00.0
+supports-statistics: yes
+supports-test: no
+supports-eeprom-access: no
+supports-register-dump: no
+supports-priv-flags: no
+hardware timestamping:
+Time stamping parameters for enp39s0:
+Capabilities:
+	software-transmit
+	software-receive
+	software-system-clock
+PTP Hardware Clock: none
+Hardware Transmit Timestamp Modes: none
+Hardware Receive Filter Modes: none
+Channel parameters for enp39s0:
+Pre-set maximums:
+RX:		n/a
+TX:		n/a
+Other:		n/a
+Combined:	8
+Current hardware settings:
+RX:		n/a
+TX:		n/a
+Other:		n/a
+Combined:	8

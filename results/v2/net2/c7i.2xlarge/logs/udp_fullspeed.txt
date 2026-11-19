@@ -1,0 +1,18 @@
+listening: A=0.0.0.0:31001 (rcvbuf 67108864) B=0.0.0.0:31002 (rcvbuf 67108864), kernel software receive timestamp requested
+receiver ready
+receiver: kernel UDP sockets (recvmmsg), 74.15 s, stopped: end of session
+  packets A 5854164, B 5853838, recovered 171730; heartbeats 0, end of session 6
+  messages 8883976 (book 263250843); duplicates 180764, overlaps 101, buffered 47354, overflow 11436215
+  gaps 7: filled by the other line 0, by re-request 6, by snapshot 1
+    re-request: recovery time p50 327155.7 us, p99 654311.4 us, max 989561.1 us
+    snapshot: recovery time p50 70492.5 ms, max 70492.5 ms
+  recovery: 21 requests, 3025 re-requests sent, 138 retries, 0 exhausted, 171730 packets recovered; snapshots 5 loaded, 0 discarded, 0 failed (132.3 MB)
+  kernel drops: path 391836, system-wide 391836
+  wire to book (kernel software receive timestamp, 333372 samples): p50 138412.03 us, p90 637534.21, p99 698491.81, p99.9 698491.81, max 698491.81
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest)                    OK (7 of 251, 244 before a snapshot)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
