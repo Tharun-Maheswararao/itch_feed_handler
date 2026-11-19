@@ -162,6 +162,7 @@ aws ec2 describe-instances --region us-east-1 --filters Name=tag:Project,Values=
 
 | Symptom | Fix |
 |---|---|
+| `net` or `net2` step stopped by its 150-minute limit | Some run never finished. Every run's logs are in the `linux-net-<run id>` (or `linux-net2-…`) artifact, uploaded even after a timeout: `logs/<run>/receiver.txt` gives the stop reason. A run is also capped at 25 minutes (`RUN_TIMEOUT`) |
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The OIDC subject in the role's trust policy must match what GitHub sends. Check with `gh api repos/OWNER/REPO/actions/oidc/customization/sub`: repos with `use_immutable_subject` send `repo:OWNER@ID/REPO@ID:ref:refs/heads/main`. Re-running `setup_aws.sh` writes the right one. The workflow must also run from `main`, and `AWS_ROLE_ARN` must be the ARN the script printed |
 | `VcpuLimitExceeded` | Request the quota increase printed by the setup script |
 | `UnauthorizedOperation` on `RunInstances` | The instance type is not in the allowed list in `permissions-policy.json`. Add it and re-run `setup_aws.sh` |

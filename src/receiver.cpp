@@ -278,9 +278,16 @@ ReceiverReport run_receiver(RxPath& path, const ReceiverConfig& cfg, const std::
                 rep.stop_reason = "no packet arrived";
                 break;
             }
-            const bool recovering = rec && requested_to > arbiter->expected() && now - request_time < cfg.recovery_timeout;
-            if (any && now - last_packet > cfg.idle_timeout && !recovering) {
-                rep.stop_reason = arbiter->in_gap() ? "idle with an unfilled gap" : "idle before end of session";
+            // With a gap open and recovery on, allow recovery_timeout without
+            // any packet, from the lines or from recovery; otherwise
+            // idle_timeout. Sending a request is not progress: if the
+            // servers are gone, every request fails at once, and counting
+            // them would keep the receiver waiting for ever.
+            const bool recovering = rec && arbiter->in_gap();
+            if (any && now - last_packet > (recovering ? cfg.recovery_timeout : cfg.idle_timeout)) {
+                rep.stop_reason = arbiter->in_gap() ? (recovering ? "gap not recovered within the recovery timeout"
+                                                                  : "idle with an unfilled gap")
+                                                    : "idle before end of session";
                 break;
             }
         } else if (idle_polls == 1) {

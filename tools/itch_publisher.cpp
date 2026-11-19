@@ -21,7 +21,9 @@
 //   --retention N                   only the newest N messages can be re-sent
 //   --max-request N                 messages per request (default 2048)
 //   --snapshot-listen HOST:PORT     serve order-level book snapshots (TCP)
-//   --linger-ms N                   keep serving after the end of session (default 3000)
+//   --linger-ms N                   keep serving after the end of session (default 3000);
+//                                   SIGINT or SIGTERM ends the linger early
+#include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -39,7 +41,9 @@ using namespace fh;
 namespace {
 
 mold::Publisher* g_pub = nullptr;
+std::atomic<bool> g_stop{false};
 void on_signal(int) {
+    g_stop = true;
     if (g_pub) g_pub->stop();
 }
 
@@ -140,7 +144,12 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         const auto st = pub.run();
         g_pub = nullptr;
-        if (rts || snaps) std::this_thread::sleep_for(std::chrono::milliseconds(linger_ms));
+        // Keep the recovery servers up for receivers still filling gaps. A
+        // script that knows when its receiver is done ends this early with
+        // SIGINT/SIGTERM.
+        const auto linger_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(linger_ms);
+        while ((rts || snaps) && !g_stop && std::chrono::steady_clock::now() < linger_end)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
         std::printf("published %llu messages in %llu packets, %.2f s, %.0f msgs/s\n",
                     (unsigned long long)st.messages, (unsigned long long)st.packets, st.seconds, st.msgs_per_sec());

@@ -41,7 +41,7 @@ struct ReceiverConfig {
     uint32_t sample_shift = 4;             // time 1 in 16 book messages
     std::chrono::milliseconds start_timeout{10'000};  // give up if no packet arrives
     std::chrono::milliseconds idle_timeout{3'000};    // give up after this long with no packet
-    std::chrono::milliseconds recovery_timeout{120'000};  // ... unless recovery is still working
+    std::chrono::milliseconds recovery_timeout{120'000};  // ... or this long while recovery works on a gap
     uint64_t (*alloc_count)() = nullptr;   // set to fh::allocation_count when linked with fh_alloc_counter
     uint64_t warmup_messages = 100'000;    // allocations are counted after this many messages
     // Setup (book pools, ring, buffers) takes a few hundred ms. Packets sent

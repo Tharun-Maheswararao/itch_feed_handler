@@ -14,6 +14,7 @@
 # reference. Writes $OUT/*.json, the logs, and $OUT/SUMMARY.md.
 #
 # Environment: RATE=2000000 RUNS=3 TRANSPORTS="udp xdp" OUT=results/v2/net/<host>
+#              RUN_TIMEOUT=1500 (seconds; a run that takes longer is stopped and fails)
 set -euo pipefail
 
 BUILD=$1 FILE=$2 GOLDEN=$3
@@ -39,8 +40,9 @@ net_run() {  # name transport rate [receiver args...] --- [publisher args...]
   local name=$1 transport=$2 rate=$3
   shift 3
   echo "== $name"
+  # A ceiling per run, so one stuck run cannot use up the whole job.
   OUT="$OUT/logs/$name" TRANSPORT=$transport RATE=$rate PUB_CPU=$PUB \
-    bench/netns_feed.sh "$BUILD" "$FILE" "$GOLDEN" -- --json "$OUT/$name.json" --start-timeout-ms 600000 "$@" \
+    timeout -k 30 "${RUN_TIMEOUT:-1500}" bench/netns_feed.sh "$BUILD" "$FILE" "$GOLDEN" -- --json "$OUT/$name.json" --start-timeout-ms 180000 "$@" \
     > "$OUT/logs/$name.txt" 2>&1 || echo "   FAILED (see $OUT/logs/$name.txt)"
   grep -E "^receiver:|wire to book|gaps [0-9]|^PASS|^FAIL" "$OUT/logs/$name/receiver.txt" | sed 's/^/   /' || true
 }

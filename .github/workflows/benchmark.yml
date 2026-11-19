@@ -234,6 +234,9 @@ jobs:
 
       - name: Version 2 on one host (netns, kernel sockets and AF_XDP)
         if: ${{ inputs.mode == 'net' }}
+        # Well inside the instance's 3-hour self power-off, so a stuck run
+        # still ends here and the logs and partial results upload.
+        timeout-minutes: 150
         env:
           RATE: ${{ inputs.rate }}
           RUNS: ${{ inputs.runs }}
@@ -384,6 +387,7 @@ jobs:
           cmake -S . -B build-net -DCMAKE_BUILD_TYPE=Release -DFH_NATIVE=ON -DFH_BUILD_TESTS=OFF -DFH_ENABLE_XDP=ON
           cmake --build build-net -j"$(nproc)" --target itch_receiver
       - name: Receive every run of the plan
+        timeout-minutes: 150
         env:
           RATE: ${{ inputs.rate }}
           RUNS: ${{ inputs.runs }}

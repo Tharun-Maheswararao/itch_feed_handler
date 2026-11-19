@@ -36,17 +36,47 @@ done
 
 if [ "$ROLE" = publish ]; then
   FILE=$3 RX_IP=$4
+  # The receiver opens the ready port when it is listening for the next run,
+  # which also means it has finished the previous one: only then is the
+  # previous publisher (still serving retransmits and snapshots) stopped.
+  # After the last run the receiver opens the port once more to say "done".
+  prev=""
+  stop_prev() {
+    if [ -n "$prev" ]; then
+      kill -TERM "$prev" 2>/dev/null || true
+      wait "$prev" 2>/dev/null || true
+      prev=""
+    fi
+  }
+  trap stop_prev EXIT
+  wait_ready() {
+    local deadline=$((SECONDS + 3600))
+    until python3 -c "import socket; socket.create_connection(('$RX_IP', $READY_PORT), 2).close()" 2>/dev/null; do
+      if [ "$SECONDS" -gt "$deadline" ]; then
+        echo "receiver $RX_IP never opened TCP $READY_PORT: check the security group (docs/AWS_BENCHMARK.md)" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+  }
   for entry in "${PLAN[@]}"; do
     read -r name transport rate loss _ <<< "$entry"
     echo "== $name: waiting for the receiver"
-    until python3 -c "import socket,sys; socket.create_connection(('$RX_IP', $READY_PORT), 2).close()" 2>/dev/null; do
-      sleep 1
-    done
+    wait_ready
+    stop_prev
     args=()
     [ "$loss" = 1 ] && args=("${LOSS[@]}")
     taskset -c "${CORES[1]}" "$BUILD/itch_publisher" "$FILE" --line-a "$RX_IP:31001" --line-b "$RX_IP:31002" \
-      --rate "$rate" --retransmit-listen 0.0.0.0:31003 --snapshot-listen 0.0.0.0:31004 --linger-ms 5000 \
-      ${args[@]+"${args[@]}"} | grep -vE "^ *$" | sed 's/^/   /'
+      --rate "$rate" --retransmit-listen 0.0.0.0:31003 --snapshot-listen 0.0.0.0:31004 --linger-ms 900000 \
+      ${args[@]+"${args[@]}"} > "publisher_$name.txt" 2>&1 &
+    prev=$!
+  done
+  echo "== waiting for the receiver to finish"
+  wait_ready
+  stop_prev
+  for entry in "${PLAN[@]}"; do
+    read -r name _ <<< "$entry"
+    echo "== $name"; grep -E "^published|line [AB]:|retransmit:|snapshots:" "publisher_$name.txt" | sed 's/^/   /'
   done
   exit 0
 fi
@@ -96,7 +126,7 @@ for entry in "${PLAN[@]}"; do
   fi
   extra=()
   [ "$qhash" = 0 ] && extra=(--no-queue-hash)
-  "$BUILD/itch_receiver" "${lines[@]}" --golden "$GOLDEN" --retransmit "$PUB_IP:31003" --snapshot "$PUB_IP:31004" \
+  timeout -k 30 2400 "$BUILD/itch_receiver" "${lines[@]}" --golden "$GOLDEN" --retransmit "$PUB_IP:31003" --snapshot "$PUB_IP:31004" \
     --cpu-rx "$RX" --cpu-book "$BOOK" --json "$OUT/$name.json" --start-timeout-ms 900000 --idle-timeout-ms 10000 \
     ${extra[@]+"${extra[@]}"} > "$OUT/logs/$name.txt" 2>&1 &
   pid=$!
@@ -108,6 +138,9 @@ for entry in "${PLAN[@]}"; do
   wait "$pid" || echo "   FAILED"
   grep -E "^receiver:|wire to book|gaps [0-9]|^PASS|^FAIL" "$OUT/logs/$name.txt" | sed 's/^/   /' || true
 done
+
+# Tell the publisher the last run is over.
+timeout 1800 python3 -c "import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('0.0.0.0', $READY_PORT)); s.listen(1); s.accept()[0].close()" || true
 
 python3 scripts/net_table.py --results "$OUT" --rate "$RATE" --where "two hosts, unicast" \
   --title "Version 2 results: two hosts ($(hostname -s))" > "$OUT/SUMMARY.md"

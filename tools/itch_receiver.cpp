@@ -10,6 +10,7 @@
 //   --cpu-rx N --cpu-book N
 //   --buffer-packets N    reorder buffer slots (default 4096)
 //   --start-timeout-ms N  --idle-timeout-ms N
+//   --recovery-timeout-ms N   give up on a gap after this long with no packet at all (default 120000)
 //   --sample-shift N      time 1 in 2^N book messages (default 4)
 //   --json FILE           also write the results as one JSON object (bench scripts)
 //   --no-queue-hash       at checkpoints check the level digest only (latency runs); the
@@ -84,6 +85,7 @@ int main(int argc, char** argv) {
             else if (a == "--buffer-packets") cfg.arb.buffer_packets = static_cast<uint32_t>(std::stoul(val()));
             else if (a == "--start-timeout-ms") cfg.start_timeout = std::chrono::milliseconds(std::stol(val()));
             else if (a == "--idle-timeout-ms") cfg.idle_timeout = std::chrono::milliseconds(std::stol(val()));
+            else if (a == "--recovery-timeout-ms") cfg.recovery_timeout = std::chrono::milliseconds(std::stol(val()));
             else if (a == "--sample-shift") cfg.sample_shift = static_cast<uint32_t>(std::stoul(val()));
             else if (a == "--no-queue-hash") cfg.verify_queue_order = false;
             else if (a == "--retransmit") cfg.recovery.retransmit = val();

@@ -59,6 +59,7 @@ struct Scenario {
     bool retransmit = false, snapshot = false;
     recovery::RetransmitConfig rt;
     std::chrono::milliseconds server_down{0};  // retransmit server ignores requests this long after start
+    bool server_dead = false;                  // ... or for the whole run
 };
 
 struct Outcome {
@@ -84,7 +85,7 @@ Outcome run(Scenario s) {
     if (s.retransmit) {
         rts = std::make_unique<recovery::RetransmitServer>(*f.index, s.pub.session, next_seq, s.rt);
         s.rx.recovery.retransmit = "127.0.0.1:" + std::to_string(rts->port());
-        if (s.server_down.count()) rts->set_down(true);
+        if (s.server_down.count() || s.server_dead) rts->set_down(true);
     }
     if (s.snapshot) {
         snaps = std::make_unique<recovery::SnapshotServer>(f.bytes.data(), f.bytes.data() + f.bytes.size(), next_seq);
@@ -94,7 +95,8 @@ Outcome run(Scenario s) {
     s.rx.golden = &f.gold;
     s.rx.capture_path = s.capture;
     s.rx.idle_timeout = std::chrono::milliseconds(1500);
-    s.rx.recovery_timeout = std::chrono::milliseconds(5000);
+    if (s.rx.recovery_timeout == net::ReceiverConfig{}.recovery_timeout)
+        s.rx.recovery_timeout = std::chrono::milliseconds(5000);
     s.rx.warmup_messages = 0;
 
     Outcome o;
@@ -333,6 +335,28 @@ TEST_P(Recovery, LineADiesPermanently) {
     const auto o = run(s);
     expect_verified(o.rep);
     EXPECT_EQ(o.rep.arb.packets[0], 1500u);
+}
+
+// A gap nothing can fill (retransmit server never answers, no snapshot
+// server): the receiver must give up after recovery_timeout without a
+// packet and report it, not wait for ever. It used to: every failed request
+// restarted the timer (found when an EC2 benchmark ran into the instance's
+// 3-hour power-off).
+TEST(RecoveryLimits, UnrecoverableGapEndsTheRunInsteadOfHanging) {
+    Scenario s;
+    s.retransmit = true;
+    s.server_dead = true;
+    s.rx.recovery.request_timeout = std::chrono::microseconds(500);
+    s.rx.recovery.max_retries = 2;
+    s.rx.recovery_timeout = std::chrono::milliseconds(1500);
+    s.pub.loss.drop_ranges.push_back({5000, 5009, 3});
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto o = run(s);
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    EXPECT_FALSE(o.rep.complete);
+    EXPECT_STREQ(o.rep.stop_reason, "gap not recovered within the recovery timeout");
+    EXPECT_GT(o.rep.recovery.exhausted, 0u);
+    EXPECT_LT(secs, 30.0);
 }
 
 INSTANTIATE_TEST_SUITE_P(Seeds, Recovery, ::testing::Values(1, 2, 3));

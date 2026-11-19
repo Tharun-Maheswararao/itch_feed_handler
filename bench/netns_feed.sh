@@ -45,12 +45,17 @@ PUB_IP=10.77.0.1 RX_IP=10.77.0.2
 GROUP_A=239.1.1.1 GROUP_B=239.1.1.2
 PORT_A=31001 PORT_B=31002 PORT_RT=31003 PORT_SNAP=31004
 
+RX_PID="" PUB_PID=""
 cleanup() {
+  # Interrupted (timeout, Ctrl-C) or done: never leave a publisher or
+  # receiver running, nor the namespaces.
+  for pid in $RX_PID $PUB_PID; do kill "$pid" 2>/dev/null || true; done
   [ "${KEEP:-0}" = 1 ] && return
   ip netns del "$PUB_NS" 2>/dev/null || true
   ip netns del "$RX_NS" 2>/dev/null || true
 }
 trap cleanup EXIT
+trap 'exit 143' TERM INT
 cleanup
 
 ip netns add "$PUB_NS"
@@ -93,14 +98,22 @@ done
 
 PUB_PIN=()
 [ -n "${PUB_CPU:-}" ] && PUB_PIN=(taskset -c "$PUB_CPU")
+# The publisher keeps its retransmit and snapshot servers up after the end of
+# session until the receiver is finished (it may still be recovering), then
+# is told to stop. The linger is only a ceiling.
 ip netns exec "$PUB_NS" ${PUB_PIN[@]+"${PUB_PIN[@]}"} "$BUILD/itch_publisher" "$FEED" \
   --line-a "$GROUP_A:$PORT_A" --line-b "$GROUP_B:$PORT_B" --interface "$PUB_IP" --rate "$RATE" \
-  --retransmit-listen "$PUB_IP:$PORT_RT" --snapshot-listen "$PUB_IP:$PORT_SNAP" --linger-ms 3000 \
-  ${PUB_ARGS[@]+"${PUB_ARGS[@]}"} > "$OUT/publisher.txt" 2>&1
+  --retransmit-listen "$PUB_IP:$PORT_RT" --snapshot-listen "$PUB_IP:$PORT_SNAP" --linger-ms 900000 \
+  ${PUB_ARGS[@]+"${PUB_ARGS[@]}"} > "$OUT/publisher.txt" 2>&1 &
+PUB_PID=$!
 
 set +e
 wait "$RX_PID"
 status=$?
+RX_PID=""
+kill -TERM "$PUB_PID" 2>/dev/null
+wait "$PUB_PID"
+PUB_PID=""
 set -e
 cat "$OUT/publisher.txt" "$OUT/receiver.txt"
 exit $status

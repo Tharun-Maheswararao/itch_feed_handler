@@ -796,6 +796,21 @@ map in place, no allocation), loads the snapshot, and only then sees the
 buffered messages after it. A snapshot that arrives after the gap was filled
 another way is discarded: loading it would move the book backwards.
 
+How long to keep trying is bounded by time without progress, not by
+requests: with a gap open, the receiver gives up after
+`--recovery-timeout-ms` (120 s) in which not one packet arrived from either
+line or from recovery, and reports the gap as unrecovered. The first EC2
+run found the version that counted requests instead: the benchmark's
+publisher exited 3 s after its last packet, taking the retransmit and
+snapshot servers with it, while a receiver on a busy 4-core host still had
+gaps to fill. Every request then failed at once and restarted the wait, so
+the receiver waited until the instance powered itself off three hours
+later, and the job left no log. Now the scripts keep the publisher serving
+until the receiver is done, every run has a time limit, the workflow step
+ends well before the power-off so logs and partial results always upload,
+and `RecoveryLimits.UnrecoverableGapEndsTheRunInsteadOfHanging` checks that
+a gap nothing can fill ends the run within seconds.
+
 Test matrix ([`test_net.cpp`](../tests/test_net.cpp)), every row with three
 loss seeds, over loopback; each must end with every checkpoint matching:
 
