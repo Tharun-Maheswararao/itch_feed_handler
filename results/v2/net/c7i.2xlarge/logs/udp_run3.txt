@@ -1,0 +1,25 @@
+retransmit server on port 31003 (268744780 messages indexed, retention all, max 2048 per request)
+snapshot server on port 31004
+publishing data/12302019.NASDAQ_ITCH50 (8251407909 bytes) on A=239.1.1.1:31001 B=239.1.1.2:31002, rate 2000000 msgs/s
+published 268744780 messages in 6049916 packets, 134.37 s, 2000000 msgs/s
+  line A: sent 6049916, dropped 0, duplicated 0, delayed 0
+  line B: sent 6049916, dropped 0, duplicated 0, delayed 0
+  heartbeats 0, send errors 0, loss seed 1
+  retransmit: 0 requests, 0 messages in 0 packets; trimmed 0, refused (retention) 0, rate limited 0, bad 0
+  snapshots: 0 served (0.0 MB, last at seq 0), 0 failed
+listening: A=239.1.1.1:31001 (rcvbuf 67108864) B=239.1.1.2:31002 (rcvbuf 67108864), kernel software receive timestamp requested
+receiver ready
+receiver: kernel UDP sockets (recvmmsg), 136.02 s, stopped: end of session
+  packets A 6049917, B 6049916, recovered 0; heartbeats 0, end of session 1
+  messages 268744780 (book 263250843); duplicates 6049916, overlaps 0, buffered 0, overflow 0
+  gaps 0: filled by the other line 0, by re-request 0, by snapshot 0
+  recovery: 0 requests, 0 re-requests sent, 0 retries, 0 exhausted, 0 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (kernel software receive timestamp, 16452294 samples): p50 6.91 us, p90 11.52, p99 16.89, p99.9 22.53, max 149.88
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest)                    OK (251 of 251)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
