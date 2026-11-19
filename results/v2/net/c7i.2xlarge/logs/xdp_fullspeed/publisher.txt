@@ -1,0 +1,9 @@
+retransmit server on port 31003 (268744780 messages indexed, retention all, max 2048 per request)
+snapshot server on port 31004
+publishing data/12302019.NASDAQ_ITCH50 (8251407909 bytes) on A=239.1.1.1:31001 B=239.1.1.2:31002, full speed
+published 268744780 messages in 6049916 packets, 21.75 s, 12353480 msgs/s
+  line A: sent 6049916, dropped 0, duplicated 0, delayed 0
+  line B: sent 6049916, dropped 0, duplicated 0, delayed 0
+  heartbeats 0, send errors 0, loss seed 1
+  retransmit: 3277 requests, 6564458 messages in 191100 packets; trimmed 0, refused (retention) 0, rate limited 0, bad 0
+  snapshots: 2 served (31.0 MB, last at seq 268744780), 0 failed

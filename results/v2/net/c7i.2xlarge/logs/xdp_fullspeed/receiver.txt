@@ -1,0 +1,24 @@
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libxdp: No bpffs found at /sys/fs/bpf
+libxdp: Can't use dispatcher without a working bpffs
+libxdp: Falling back to loading single prog without dispatcher
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+listening: AF_XDP (copy mode, generic XDP on vrx queue 0), ports A 31001 B 31002
+receiver ready
+receiver: AF_XDP (copy mode, generic XDP on vrx queue 0), 160.79 s, stopped: end of session
+  packets A 6005647, B 6005650, recovered 191100; heartbeats 0, end of session 6
+  messages 6981043 (book 263250843); duplicates 174889, overlaps 1065, buffered 59821, overflow 11791525
+  gaps 2: filled by the other line 0, by re-request 1, by snapshot 1
+    re-request: recovery time p50 238868.4 us, p99 238868.4 us, max 238868.4 us
+    snapshot: recovery time p50 158740.7 ms, max 158740.7 ms
+  recovery: 99 requests, 3277 re-requests sent, 134 retries, 0 exhausted, 191100 packets recovered; snapshots 2 loaded, 0 discarded, 0 failed (31.0 MB)
+  kernel drops: path 88541, system-wide 0
+  wire to book (user-space poll timestamp, 262341 samples): p50 9961.47 us, p90 38797.31, p99 213909.50, p99.9 243269.63, max 252337.58
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest)                    OK (5 of 251, 246 before a snapshot)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS

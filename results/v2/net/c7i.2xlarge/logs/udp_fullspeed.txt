@@ -1,0 +1,27 @@
+retransmit server on port 31003 (268744780 messages indexed, retention all, max 2048 per request)
+snapshot server on port 31004
+publishing data/12302019.NASDAQ_ITCH50 (8251407909 bytes) on A=239.1.1.1:31001 B=239.1.1.2:31002, full speed
+published 268744780 messages in 6049916 packets, 41.93 s, 6409665 msgs/s
+  line A: sent 6049916, dropped 0, duplicated 0, delayed 0
+  line B: sent 6049916, dropped 0, duplicated 0, delayed 0
+  heartbeats 0, send errors 0, loss seed 1
+  retransmit: 3447 requests, 7014388 messages in 174212 packets; trimmed 0, refused (retention) 0, rate limited 0, bad 0
+  snapshots: 4 served (98.9 MB, last at seq 268744780), 0 failed
+listening: A=239.1.1.1:31001 (rcvbuf 67108864) B=239.1.1.2:31002 (rcvbuf 67108864), kernel software receive timestamp requested
+receiver ready
+receiver: kernel UDP sockets (recvmmsg), 74.50 s, stopped: end of session
+  packets A 5717709, B 5713734, recovered 174212; heartbeats 0, end of session 6
+  messages 12386139 (book 263250843); duplicates 300266, overlaps 65, buffered 48977, overflow 10993199
+  gaps 6: filled by the other line 0, by re-request 5, by snapshot 1
+    re-request: recovery time p50 402653.2 us, p99 637534.2 us, max 794917.8 us
+    snapshot: recovery time p50 71856.1 ms, max 71856.1 ms
+  recovery: 19 requests, 3447 re-requests sent, 214 retries, 0 exhausted, 174212 packets recovered; snapshots 4 loaded, 0 discarded, 0 failed (98.9 MB)
+  kernel drops: path 668395, system-wide 668395
+  wire to book (kernel software receive timestamp, 520838 samples): p50 54525.95 us, p90 637534.21, p99 1023410.18, p99.9 1026719.91, max 1026719.91
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest)                    OK (10 of 251, 241 before a snapshot)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
