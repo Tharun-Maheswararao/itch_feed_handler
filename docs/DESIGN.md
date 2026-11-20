@@ -944,4 +944,36 @@ with the old 4 K ring). Re-request recovery took 1.2 ms at p50 on both paths.
 At full speed (6.4 and 12.4 M msgs/s sent) both paths fell behind, recovered
 by re-request and snapshot resync, and ended with a verified book.
 
-Two-host numbers come from the workflow's `net2` mode (AWS_BENCHMARK.md).
+**Across two EC2 hosts** (`c7i.2xlarge` each, ENA, the VPC between them,
+lines unicast to two ports on the receiver;
+[summary](../results/v2/net2/c7i.2xlarge/SUMMARY.md)):
+
+| Path | Stamp | p50 | p99 | p99.9 | Max (median of runs) |
+|---|---|---:|---:|---:|---:|
+| kernel sockets | kernel software receive | 15.36 µs | 37.89 µs | 51.20 µs | 573 µs |
+| AF_XDP (copy mode, generic XDP on ENA) | user-space poll | 11.26 µs | 31.23 µs | 44.03 µs | 196 µs |
+
+The network itself adds about 8.6 µs at p50 to the socket path and 6.4 µs
+to AF_XDP, and AF_XDP's saving grows from about 2 to about 4 µs at p50 and
+from 3 to 7 µs at p99 once a real NIC and driver are in the path,
+presumably because the work AF_XDP skips (the IP and UDP stack, the
+socket queue, the system call per batch) costs more behind a real driver
+than on a veth; this run does not break that down. Wire to book is measured on the receiver alone (its
+receive stamp to its own clock after the book update), so the hosts'
+clocks never need to agree. ENA reports no PTP clock and no hardware
+receive stamping, so the rows are software and poll stamps. Zero-copy
+AF_XDP was refused by this ENA driver and the run fell back to copy mode;
+the receiver's interface was set from 8 queues to 1 for the run so that
+every feed packet reached the one queue the socket binds, and restored
+afterwards. Native-mode and zero-copy AF_XDP on a NIC that supports them,
+and DPDK on a second interface, are the obvious next measurements.
+
+Every run passed against the golden file, including both loss runs (all
+251 checkpoints with queue order) and both full-speed runs (recovered by
+re-request and snapshot resync). One thing in these runs is not explained:
+the loss runs' median wire-to-book latency was 3.7 ms (sockets) and 5.1 ms
+(AF_XDP) across two hosts against about 11 µs for the same runs on one
+host. Those are verification runs, whose latency includes queue-order
+walks at every checkpoint and messages waiting behind gaps, so it was never
+a latency result, and the books were right; but why two hosts move the
+median that much has not been investigated.

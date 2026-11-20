@@ -463,9 +463,9 @@ Setup steps go in `docs/AWS_BENCHMARK.md` as they are added.
 | Oct 29 to Oct 30 ✅ | C0 | FIFO book, allocation counter at zero, golden hash file: **done** ([results](../results/v2/fifo_check_m4.txt)) |
 | Nov 5 ✅ | v1.1 | side task in the slack C0 left: book snapshots over ZeroMQ + Protobuf ([DESIGN.md section 16](DESIGN.md#16-version-11-publishing-the-book-over-the-network)); not part of Stage C |
 | Nov 18 ✅ | C1 | publisher with loss injection, round-trip test passing ([test_mold](../tests/test_mold.cpp)) |
-| Nov 18 ✅ | C2 | kernel receiver, arbitration, clean run on one host: full Nasdaq day over the network, 251 of 251 checkpoints ([log](../results/v2/c2_full_day_loopback_m4.txt)); across AWS: workflow mode `net2`, not yet run |
+| Nov 18–19 ✅ | C2 | kernel receiver, arbitration; clean runs on one host ([log](../results/v2/c2_full_day_loopback_m4.txt)) and across two AWS hosts ([summary](../results/v2/net2/c7i.2xlarge/SUMMARY.md)), 251 of 251 checkpoints |
 | Nov 18 ✅ | C3 | full recovery test matrix passing in CI (10 rows × 3 seeds, [test_net](../tests/test_net.cpp)), including snapshot resync and late join |
-| Nov 18–19 ✅ | C4 | AF_XDP and DPDK (functional) behind the same receive interface, verified in CI; one-host EC2 table ([summary](../results/v2/net/c7i.2xlarge/SUMMARY.md)): AF_XDP 4.86 / 13.57 µs p50 / p99 against 6.78 / 16.38 µs for kernel sockets, book verified under loss; two hosts (`net2`): not yet run |
+| Nov 18–19 ✅ | C4 | AF_XDP and DPDK (functional) behind the same receive interface, verified in CI; one-host EC2 table ([summary](../results/v2/net/c7i.2xlarge/SUMMARY.md)): AF_XDP 4.86 / 13.57 µs p50 / p99 against 6.78 / 16.38 µs for kernel sockets, book verified under loss; two hosts ([summary](../results/v2/net2/c7i.2xlarge/SUMMARY.md)): AF_XDP 11.26 / 31.23 µs against 15.36 / 37.89 µs, book verified under loss |
 | early January | polish | README, résumé bullet, interview drill |
 
 If finals squeeze C3: cut DPDK, never cut recovery testing.

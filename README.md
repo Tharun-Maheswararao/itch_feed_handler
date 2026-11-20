@@ -402,7 +402,7 @@ results: [DESIGN.md sections 15 and 17](docs/DESIGN.md#17-version-2-the-network-
 | **C1** | MoldUDP64 replay publisher: packets sent straight from the file mapping, lines A and B, fixed-rate or timestamp pacing, heartbeats, **seeded loss injection** (drops per line and on both, bursts, duplicates, reordering, dead line) | ✅ |
 | **C2** | receiver: one busy-polling thread arbitrates both lines (first copy of each sequence wins, duplicates and overlaps dropped, reorder buffer), wire-to-book timestamps with their source on every result | ✅ |
 | **C3** | gap recovery off the hot path: other line, then MoldUDP64 re-request, then **book snapshot** resync; retransmit server with retention, request caps and per-client rate limits; a 10-row loss test matrix with 3 seeds each in CI | ✅ |
-| **C4** | kernel bypass behind the same receive interface: **AF_XDP** (XDP program redirects only the feed's ports) and **DPDK** (functional, time-boxed) | ✅ one-host EC2 table below; two hosts: workflow `mode=net2`, not yet run |
+| **C4** | kernel bypass behind the same receive interface: **AF_XDP** (XDP program redirects only the feed's ports) and **DPDK** (functional, time-boxed) | ✅ EC2 tables below, one host and two hosts; DPDK on EC2 hardware is future work |
 
 ```
 itch_publisher ──line A (UDP)──┐                    ┌─ kernel sockets | AF_XDP | DPDK
@@ -443,6 +443,24 @@ groups; median of three clean runs;
   and snapshot resyncs, and the book still matches at the end. A recovery
   stress test, not a throughput figure.
 
+**Across two EC2 hosts** (`c7i.2xlarge` to `c7i.2xlarge` over the VPC, ENA
+network card, the lines unicast to two ports on the receiver; same day,
+rate and method; [summary](results/v2/net2/c7i.2xlarge/SUMMARY.md),
+workflow `mode=net2`):
+
+| Receive path | Timestamp source | p50 | p99 | p99.9 | Book after seeded loss |
+|---|---|---:|---:|---:|---|
+| kernel sockets (`recvmmsg`) | kernel software receive | 15.36 µs | 37.89 µs | 51.20 µs | **251 of 251 checkpoints**, 5,724 gaps recovered |
+| **AF_XDP** (copy mode, generic XDP on the ENA interface) | user-space poll | **11.26 µs** | **31.23 µs** | **44.03 µs** | **251 of 251 checkpoints**, 1,173 gaps recovered |
+
+Over a real network AF_XDP saves about 4 µs at p50 and 7 µs at p99, about
+twice what it saved on one host. Both stamps are taken on the receiving
+host, so no clock synchronisation between the hosts is involved; ENA has
+no hardware timestamping (`ethtool -T`: no PTP clock), so no row says
+"NIC". Zero-copy AF_XDP was not available on this ENA driver, so it ran in
+copy mode, and the receiver's interface was set to one queue for the run
+so every feed packet reached the socket's queue.
+
 **The full Nasdaq day over the network** (M4, loopback, two lines, 2 M
 msgs/s, [log](results/v2/c2_full_day_loopback_m4.txt)): all 268,744,780
 messages delivered, **251 of 251 checkpoints and the final book match the
@@ -474,8 +492,8 @@ configuration's p99 moved by up to 300× between the two runs (AF_XDP clean:
 here should be read as "AF_XDP has the better tail". The timestamp sources
 also differ: the socket rows use the kernel's receive stamp, AF_XDP and DPDK
 a user-space poll stamp, which comes later and so flatters the socket path.
-The pinned EC2 table above is the measurement; two-host numbers come from
-the workflow's `net2` mode ([how](docs/AWS_BENCHMARK.md)).
+The pinned EC2 tables above are the measurement
+([how to rerun them](docs/AWS_BENCHMARK.md)).
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
