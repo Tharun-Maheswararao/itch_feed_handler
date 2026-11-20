@@ -1,0 +1,22 @@
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+libbpf: elf: skipping unrecognized data section(7) xdp_metadata
+listening: AF_XDP (copy mode, generic XDP on enp39s0 queue 0), ports A 31001 B 31002
+receiver ready
+receiver: AF_XDP (copy mode, generic XDP on enp39s0 queue 0), 136.85 s, stopped: end of session
+  packets A 6045156, B 6045139, recovered 2775; heartbeats 0, end of session 1
+  messages 268744780 (book 263250843); duplicates 5439560, overlaps 0, buffered 604676, overflow 0
+  gaps 1173: filled by the other line 7, by re-request 1166, by snapshot 0
+    other line: open p50 1.6 us, p99 1.8 us
+    re-request: recovery time p50 1441.8 us, p99 17301.5 us, max 23092.6 us
+  recovery: 1289 requests, 2280 re-requests sent, 980 retries, 0 exhausted, 2775 packets recovered; snapshots 0 loaded, 0 discarded, 0 failed (0.0 MB)
+  kernel drops: path 0, system-wide 0
+  wire to book (user-space poll timestamp, 16447363 samples): p50 5111.81 us, p90 22020.10, p99 163577.86, p99.9 176160.77, max 191025.80
+  complete (every message to end of session)                 OK
+  checkpoints match golden (level digest + queue order)      OK (251 of 251)
+  final book matches golden (level digest + queue order)     OK
+  invariants                                                 OK
+  no pool overflow                                           OK
+  heap allocations after warmup                              OK (0)
+PASS
